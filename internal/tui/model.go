@@ -32,8 +32,8 @@ type Model struct {
 
 	// View state
 	width, height int
-	offset   int // scroll offset from bottom
-	atBottom bool
+	offset        int // scroll offset from bottom
+	atBottom      bool
 
 	// Filter
 	filterMode  bool
@@ -50,9 +50,9 @@ type Model struct {
 // New creates a new TUI model.
 func New(cfg *config.Config, p *parser.Parser, s *store.Store) *Model {
 	return &Model{
-		cfg:       cfg,
-		parser:    p,
-		store:     s,
+		cfg:      cfg,
+		parser:   p,
+		store:    s,
 		atBottom: true,
 	}
 }
