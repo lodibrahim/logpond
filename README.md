@@ -14,14 +14,28 @@ your-app 2>&1 | logpond --config ./config.yaml
 - **MCP Server** — AI agents query your logs via `stats`, `search_logs`, `tail`, `get_schema`
 - **Hub** — Auto-spawning aggregator discovers all running instances, one MCP endpoint for all services
 - **Config-driven** — YAML defines columns, field mappings, and MCP behavior
+- **JSON + logfmt** — Supports structured JSON and key=value logfmt formats
 - **Ring buffer** — Fixed-capacity circular buffer (default 50k entries), zero-copy iteration
-- **Generic** — Works with any JSON log format, not tied to any specific app or framework
+- **Cross-platform** — macOS and Linux, clipboard support on both
 
 ## Install
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap lodibrahim/tap
+brew install logpond
+```
+
+### Go
 
 ```bash
 go install github.com/lodibrahim/logpond/cmd/logpond@latest
 ```
+
+### Binary
+
+Download from [GitHub Releases](https://github.com/lodibrahim/logpond/releases).
 
 ## Quick Start
 
