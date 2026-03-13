@@ -188,3 +188,180 @@ func TestTimestampParsing(t *testing.T) {
 		t.Errorf("Timestamp = %v, want %v", entry.Timestamp, expected)
 	}
 }
+
+// --- logfmt tests ---
+
+func logfmtConfig() *config.Config {
+	return &config.Config{
+		Type: "logfmt",
+		Mapping: config.MappingConfig{
+			Timestamp: config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Severity:  config.FieldRef{Field: "level"},
+			Body:      config.FieldRef{Field: "msg"},
+		},
+		Columns: []config.ColumnConfig{
+			{Name: "Time", Source: "timestamp", Width: 8},
+			{Name: "Level", Source: "severity", Width: 5},
+			{Name: "Message", Source: "body", Flex: true},
+		},
+	}
+}
+
+func logfmtConfigWithFields() *config.Config {
+	return &config.Config{
+		Type: "logfmt",
+		Mapping: config.MappingConfig{
+			Timestamp:        config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Severity:         config.FieldRef{Field: "level"},
+			Body:             config.FieldRef{Field: "msg"},
+			AutoMapRemaining: true,
+		},
+		Columns: []config.ColumnConfig{
+			{Name: "Time", Source: "timestamp", Width: 8},
+			{Name: "Level", Source: "severity", Width: 5},
+			{Name: "Service", Source: "field:service", Width: 10},
+			{Name: "Message", Source: "body", Flex: true},
+		},
+	}
+}
+
+func TestLogfmtParseSimple(t *testing.T) {
+	p := New(logfmtConfig())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=INFO msg="hello world"`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Severity != "INFO" {
+		t.Errorf("Severity = %q, want %q", entry.Severity, "INFO")
+	}
+	if entry.Body != "hello world" {
+		t.Errorf("Body = %q, want %q", entry.Body, "hello world")
+	}
+	if entry.Timestamp.Year() != 2026 {
+		t.Errorf("Timestamp year = %d, want 2026", entry.Timestamp.Year())
+	}
+}
+
+func TestLogfmtUnquotedValues(t *testing.T) {
+	p := New(logfmtConfig())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=WARN msg=timeout`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Severity != "WARN" {
+		t.Errorf("Severity = %q, want %q", entry.Severity, "WARN")
+	}
+	if entry.Body != "timeout" {
+		t.Errorf("Body = %q, want %q", entry.Body, "timeout")
+	}
+}
+
+func TestLogfmtFieldExtraction(t *testing.T) {
+	p := New(logfmtConfigWithFields())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=INFO msg="request handled" service=api duration=23ms`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Fields["service"] != "api" {
+		t.Errorf("service = %q, want %q", entry.Fields["service"], "api")
+	}
+}
+
+func TestLogfmtAutoMapRemaining(t *testing.T) {
+	p := New(logfmtConfigWithFields())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=INFO msg="test" service=api duration=23ms status=200`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Fields["duration"] != "23ms" {
+		t.Errorf("duration = %q, want %q", entry.Fields["duration"], "23ms")
+	}
+	if entry.Fields["status"] != "200" {
+		t.Errorf("status = %q, want %q", entry.Fields["status"], "200")
+	}
+	// service should be consumed by column, not auto-mapped
+	if entry.Fields["service"] != "api" {
+		t.Errorf("service = %q, want %q", entry.Fields["service"], "api")
+	}
+}
+
+func TestLogfmtQuotedWithEscapes(t *testing.T) {
+	p := New(logfmtConfig())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=ERROR msg="failed to connect: \"timeout\""`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Body != `failed to connect: "timeout"` {
+		t.Errorf("Body = %q, want %q", entry.Body, `failed to connect: "timeout"`)
+	}
+}
+
+func TestLogfmtEmpty(t *testing.T) {
+	p := New(logfmtConfig())
+	_, err := p.Parse("")
+	if err == nil {
+		t.Error("Parse should fail for empty line")
+	}
+}
+
+func TestLogfmtRawPreserved(t *testing.T) {
+	p := New(logfmtConfig())
+	line := `ts=2026-02-19T14:14:12Z level=INFO msg="test"`
+	entry, err := p.Parse(line)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Raw != line {
+		t.Errorf("Raw = %q, want %q", entry.Raw, line)
+	}
+}
+
+func TestLogfmtResolveColumns(t *testing.T) {
+	p := New(logfmtConfigWithFields())
+	entry, err := p.Parse(`ts=2026-02-19T14:14:12Z level=INFO msg="request ok" service=api`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	cells := p.ResolveColumns(entry)
+	if len(cells) != 4 {
+		t.Fatalf("len(cells) = %d, want 4", len(cells))
+	}
+	if cells[1] != "INFO" {
+		t.Errorf("Level cell = %q, want %q", cells[1], "INFO")
+	}
+	if cells[2] != "api" {
+		t.Errorf("Service cell = %q, want %q", cells[2], "api")
+	}
+	if cells[3] != "request ok" {
+		t.Errorf("Body cell = %q, want %q", cells[3], "request ok")
+	}
+}
+
+func TestLogfmtMissingFields(t *testing.T) {
+	p := New(logfmtConfig())
+	entry, err := p.Parse(`level=INFO msg="no timestamp here"`)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if entry.Timestamp.IsZero() != true {
+		t.Error("Timestamp should be zero when missing")
+	}
+	if entry.Body != "no timestamp here" {
+		t.Errorf("Body = %q, want %q", entry.Body, "no timestamp here")
+	}
+}
+
+// Verify JSON still works after adding logfmt
+func TestJSONStillWorksAfterLogfmt(t *testing.T) {
+	p := New(simpleConfig())
+	entry, err := p.Parse(`{"ts":"2026-02-19T14:14:12Z","level":"ERROR","msg":"db timeout"}`)
+	if err != nil {
+		t.Fatalf("JSON Parse failed: %v", err)
+	}
+	if entry.Severity != "ERROR" {
+		t.Errorf("Severity = %q, want %q", entry.Severity, "ERROR")
+	}
+	if entry.Body != "db timeout" {
+		t.Errorf("Body = %q, want %q", entry.Body, "db timeout")
+	}
+}

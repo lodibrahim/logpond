@@ -1,0 +1,30 @@
+name: logfmt-app
+type: logfmt
+
+mapping:
+  timestamp:
+    field: ts
+    time_format: rfc3339
+  severity:
+    field: level
+  body:
+    field: msg
+  auto_map_remaining: true
+
+columns:
+  - name: Time
+    source: timestamp
+    format: time_short
+    width: 8
+
+  - name: Level
+    source: severity
+    width: 5
+
+  - name: Service
+    source: field:service
+    width: 10
+
+  - name: Message
+    source: body
+    flex: true
