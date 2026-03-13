@@ -50,18 +50,13 @@ func main() {
 	p := parser.New(cfg)
 	st := store.New(*bufferSize)
 
-	// Open /dev/tty for TUI (stdin is the log pipe, not a terminal)
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot open /dev/tty: %v\n", err)
-		os.Exit(1)
-	}
-	defer tty.Close()
-
-	// Create TUI — use tty for both input and output so bubbletea can manage
-	// raw mode and alt screen on the same terminal device
+	// Create TUI — WithInputTTY opens /dev/tty for keyboard input (stdin is the pipe)
 	model := tui.New(cfg, p, st)
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithInput(tty), tea.WithOutput(tty))
+	program := tea.NewProgram(model,
+		tea.WithAltScreen(),
+		tea.WithInputTTY(),
+		tea.WithMouseCellMotion(),
+	)
 
 	// Context for shutdown coordination
 	ctx, cancel := context.WithCancel(context.Background())
