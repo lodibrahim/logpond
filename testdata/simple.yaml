@@ -1,0 +1,23 @@
+name: simple
+type: json
+
+mapping:
+  timestamp:
+    field: ts
+    time_format: rfc3339
+  severity:
+    field: level
+  body:
+    field: msg
+
+columns:
+  - name: Time
+    source: timestamp
+    format: time_short
+    width: 8
+  - name: Level
+    source: severity
+    width: 5
+  - name: Message
+    source: body
+    flex: true

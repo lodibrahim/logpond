@@ -1,0 +1,32 @@
+name: algo-bot
+type: json
+
+mapping:
+  timestamp:
+    field: timestamp
+    time_format: rfc3339
+  severity:
+    field: level
+  body:
+    field: fields.message
+  auto_map_remaining: true
+
+columns:
+  - name: Time
+    source: timestamp
+    format: time_short
+    width: 8
+  - name: Level
+    source: severity
+    width: 5
+  - name: Symbol
+    source: span_field:symbol
+    width: 8
+  - name: Component
+    source: span_field:component
+    width: 12
+  - name: Message
+    source: body
+    flex: true
+    exclude:
+      - target
