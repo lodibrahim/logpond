@@ -173,12 +173,10 @@ func (m *Model) tableHeight() int {
 }
 
 func (m *Model) scrollDown() {
-	if m.cursor > 0 {
-		m.cursor--
-	} else if m.offset > 0 {
+	if m.offset > 0 {
 		m.offset--
 	}
-	if m.offset == 0 && m.cursor == 0 {
+	if m.offset == 0 {
 		m.atBottom = true
 	}
 }
@@ -186,18 +184,13 @@ func (m *Model) scrollDown() {
 func (m *Model) scrollUp() {
 	entries := m.visibleEntries()
 	tableH := m.tableHeight()
-	if m.cursor < tableH-1 && m.cursor < len(entries)-1 {
-		m.cursor++
+	maxOffset := len(entries) - tableH
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.offset < maxOffset {
+		m.offset++
 		m.atBottom = false
-	} else {
-		maxOffset := len(entries) - tableH
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
-		if m.offset < maxOffset {
-			m.offset++
-			m.atBottom = false
-		}
 	}
 }
 
