@@ -56,6 +56,20 @@ func (s *Store) All() []*parser.Entry {
 	return s.tailLocked(s.count)
 }
 
+// ForEach iterates all entries in chronological order under a read lock.
+// The callback must not retain the entry pointer.
+func (s *Store) ForEach(fn func(*parser.Entry)) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.count == 0 {
+		return
+	}
+	start := (s.head - s.count + s.capacity) % s.capacity
+	for i := 0; i < s.count; i++ {
+		fn(s.entries[(start+i)%s.capacity])
+	}
+}
+
 func (s *Store) tailLocked(n int) []*parser.Entry {
 	if n > s.count {
 		n = s.count

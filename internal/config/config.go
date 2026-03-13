@@ -13,6 +13,13 @@ type Config struct {
 	Type    string         `yaml:"type"`
 	Mapping MappingConfig  `yaml:"mapping"`
 	Columns []ColumnConfig `yaml:"columns"`
+	MCP     MCPConfig      `yaml:"mcp"`
+}
+
+type MCPConfig struct {
+	ExcludeFields []string `yaml:"exclude_fields"`
+	DefaultLimit  int      `yaml:"default_limit"`
+	Context       string   `yaml:"context"`
 }
 
 type MappingConfig struct {
