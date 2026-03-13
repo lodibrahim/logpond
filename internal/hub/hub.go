@@ -49,7 +49,7 @@ func (h *Hub) liveInstances() []registration.InstanceInfo {
 		if registration.IsAlive(info.PID) {
 			live = append(live, info)
 		} else {
-			registration.Deregister(info.Name)
+			registration.DeregisterPID(info.Name, info.PID)
 			fmt.Fprintf(os.Stderr, "logpond hub: cleaned stale instance %q (pid %d)\n", info.Name, info.PID)
 			// Remove cached session if any
 			h.mu.Lock()
@@ -69,7 +69,8 @@ func sessionKey(info registration.InstanceInfo) string {
 }
 
 // getSession returns a cached MCP client session for the instance,
-// creating one if needed.
+// creating one if needed. Uses a per-key approach to avoid holding
+// the global lock during connection setup while preventing double-create.
 func (h *Hub) getSession(ctx context.Context, info registration.InstanceInfo) (*mcp.ClientSession, error) {
 	key := sessionKey(info)
 
@@ -78,6 +79,10 @@ func (h *Hub) getSession(ctx context.Context, info registration.InstanceInfo) (*
 		h.mu.Unlock()
 		return cs.session, nil
 	}
+	// Insert a placeholder to prevent concurrent creation for the same key.
+	// Other goroutines will see it and wait by retrying after a short sleep.
+	placeholder := &cachedSession{info: info}
+	h.sessions[key] = placeholder
 	h.mu.Unlock()
 
 	client := mcp.NewClient(&mcp.Implementation{
@@ -91,6 +96,10 @@ func (h *Hub) getSession(ctx context.Context, info registration.InstanceInfo) (*
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
+		// Remove the placeholder on failure
+		h.mu.Lock()
+		delete(h.sessions, key)
+		h.mu.Unlock()
 		return nil, err
 	}
 
@@ -150,6 +159,18 @@ func (h *Hub) fanOut(ctx context.Context, instances []registration.InstanceInfo,
 	return results
 }
 
+// closeSessions closes all cached MCP sessions.
+func (h *Hub) closeSessions() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key, cs := range h.sessions {
+		if cs.session != nil {
+			cs.session.Close()
+		}
+		delete(h.sessions, key)
+	}
+}
+
 // Run starts the hub MCP server and blocks until ctx is cancelled.
 func (h *Hub) Run(ctx context.Context) error {
 	srv := mcp.NewServer(
@@ -181,6 +202,32 @@ func (h *Hub) Run(ctx context.Context) error {
 	}
 	fmt.Fprintf(os.Stderr, "logpond hub: MCP server on http://localhost:%d/mcp\n", h.port)
 
+	// Idle shutdown: if no instances are alive for 60s, shut down
+	go func() {
+		emptyChecks := 0
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if len(h.liveInstances()) == 0 {
+					emptyChecks++
+					if emptyChecks >= 2 {
+						fmt.Fprintln(os.Stderr, "logpond hub: no instances for 60s, shutting down")
+						shutCtx, shutCancel := context.WithTimeout(context.Background(), 1*time.Second)
+						httpServer.Shutdown(shutCtx) //nolint:errcheck
+						shutCancel()
+						return
+					}
+				} else {
+					emptyChecks = 0
+				}
+			}
+		}
+	}()
+
 	go func() {
 		<-ctx.Done()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -188,7 +235,9 @@ func (h *Hub) Run(ctx context.Context) error {
 		httpServer.Shutdown(shutCtx) //nolint:errcheck
 	}()
 
-	if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+	err = httpServer.Serve(ln)
+	h.closeSessions()
+	if err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil

@@ -2,6 +2,7 @@ package registration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -25,32 +26,42 @@ func dir() (string, error) {
 	return d, os.MkdirAll(d, 0755)
 }
 
-// Register writes an instance registration file to ~/.logpond/<name>.json.
+// Register writes an instance registration file to ~/.logpond/<name>-<pid>.json.
 func Register(name string, port int) error {
 	d, err := dir()
 	if err != nil {
 		return err
 	}
+	pid := os.Getpid()
 	info := InstanceInfo{
 		Name:      name,
 		Port:      port,
-		PID:       os.Getpid(),
+		PID:       pid,
 		StartedAt: time.Now(),
 	}
 	b, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(d, name+".json"), b, 0644)
+	return os.WriteFile(filepath.Join(d, regFilename(name, pid)), b, 0644)
 }
 
-// Deregister removes the instance registration file.
+// Deregister removes the instance registration file for the current process.
 func Deregister(name string) {
+	DeregisterPID(name, os.Getpid())
+}
+
+// DeregisterPID removes the registration file for a specific name+pid.
+func DeregisterPID(name string, pid int) {
 	d, err := dir()
 	if err != nil {
 		return
 	}
-	os.Remove(filepath.Join(d, name+".json"))
+	os.Remove(filepath.Join(d, regFilename(name, pid)))
+}
+
+func regFilename(name string, pid int) string {
+	return fmt.Sprintf("%s-%d.json", name, pid)
 }
 
 // Discover reads all registration files from ~/.logpond/.

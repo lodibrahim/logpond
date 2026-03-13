@@ -191,7 +191,7 @@ func discoverAll() ([]instanceStatus, error) {
 		status := "alive"
 		if !registration.IsAlive(info.PID) {
 			status = "dead"
-			registration.Deregister(info.Name)
+			registration.DeregisterPID(info.Name, info.PID)
 		}
 		out = append(out, instanceStatus{
 			Name:      info.Name,
@@ -317,11 +317,13 @@ func mergeEntries(results []fanOutResult, limit int) *mcp.CallToolResult {
 			} `json:"entries"`
 		}
 		if err := json.Unmarshal([]byte(text), &resp); err != nil {
+			// Non-JSON response (e.g., "No matches found.") — not an error, just zero entries
 			continue
 		}
+		instanceName := r.Instance // use fan-out name as source of truth
 		for _, e := range resp.Entries {
 			allEntries = append(allEntries, mergedEntry{
-				Instance:  resp.Instance,
+				Instance:  instanceName,
 				Timestamp: e.Timestamp,
 				Severity:  e.Severity,
 				Body:      e.Body,
