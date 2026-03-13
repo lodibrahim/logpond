@@ -22,6 +22,7 @@ brews:
   - repository:
       owner: lodibrahim
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/lodibrahim/logpond
     description: "TUI log viewer with built-in MCP server for AI agents"
     license: MIT
