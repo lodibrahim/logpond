@@ -184,8 +184,12 @@ func ensureHub() {
 
 	cmd := exec.Command(binPath, "hub", "--port", fmt.Sprintf("%d", defaultHubPort))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Log hub output to ~/.logpond/hub.log for diagnostics
+	home, _ := os.UserHomeDir()
+	if logFile, err := os.OpenFile(home+"/.logpond/hub.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "logpond: warning: failed to start hub: %v\n", err)
 		return
