@@ -146,7 +146,7 @@ func main() {
 
 func runHub() {
 	fs := flag.NewFlagSet("hub", flag.ExitOnError)
-	port := fs.Int("port", 9800, "Hub MCP server port")
+	port := fs.Int("port", defaultHubPort, "Hub MCP server port")
 	fs.Parse(os.Args[2:])
 
 	ctx, cancel := context.WithCancel(context.Background())

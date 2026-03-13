@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -17,13 +18,23 @@ type InstanceInfo struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
+var (
+	dirOnce  sync.Once
+	dirPath  string
+	dirError error
+)
+
 func dir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	d := filepath.Join(home, ".logpond")
-	return d, os.MkdirAll(d, 0755)
+	dirOnce.Do(func() {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			dirError = err
+			return
+		}
+		dirPath = filepath.Join(home, ".logpond")
+		dirError = os.MkdirAll(dirPath, 0755)
+	})
+	return dirPath, dirError
 }
 
 // Register writes an instance registration file to ~/.logpond/<name>-<pid>.json.

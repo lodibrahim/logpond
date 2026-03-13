@@ -24,6 +24,7 @@ type Hub struct {
 }
 
 type cachedSession struct {
+	once    sync.Once
 	info    registration.InstanceInfo
 	client  *mcp.Client
 	session *mcp.ClientSession
@@ -69,49 +70,58 @@ func sessionKey(info registration.InstanceInfo) string {
 }
 
 // getSession returns a cached MCP client session for the instance,
-// creating one if needed. Uses a per-key approach to avoid holding
-// the global lock during connection setup while preventing double-create.
+// creating one if needed. Uses a per-key sync.Once to serialize
+// concurrent connection attempts for the same instance.
 func (h *Hub) getSession(ctx context.Context, info registration.InstanceInfo) (*mcp.ClientSession, error) {
 	key := sessionKey(info)
 
 	h.mu.Lock()
-	if cs, ok := h.sessions[key]; ok {
+	cs, ok := h.sessions[key]
+	if ok {
 		h.mu.Unlock()
+		cs.once.Do(func() {}) // wait for creation to finish
+		if cs.session == nil {
+			return nil, fmt.Errorf("session creation failed for %s", info.Name)
+		}
 		return cs.session, nil
 	}
-	// Insert a placeholder to prevent concurrent creation for the same key.
-	// Other goroutines will see it and wait by retrying after a short sleep.
-	placeholder := &cachedSession{info: info}
-	h.sessions[key] = placeholder
+	cs = &cachedSession{info: info}
+	h.sessions[key] = cs
 	h.mu.Unlock()
 
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "logpond-hub",
-		Version: "0.1.0",
-	}, nil)
+	// Only one goroutine creates the connection per key
+	var connectErr error
+	cs.once.Do(func() {
+		client := mcp.NewClient(&mcp.Implementation{
+			Name:    "logpond-hub",
+			Version: "0.1.0",
+		}, nil)
 
-	transport := &mcp.StreamableClientTransport{
-		Endpoint: fmt.Sprintf("http://localhost:%d/mcp", info.Port),
+		transport := &mcp.StreamableClientTransport{
+			Endpoint: fmt.Sprintf("http://localhost:%d/mcp", info.Port),
+		}
+
+		session, err := client.Connect(ctx, transport, nil)
+		if err != nil {
+			connectErr = err
+			// Remove failed entry
+			h.mu.Lock()
+			delete(h.sessions, key)
+			h.mu.Unlock()
+			return
+		}
+
+		cs.client = client
+		cs.session = session
+	})
+
+	if connectErr != nil {
+		return nil, connectErr
 	}
-
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		// Remove the placeholder on failure
-		h.mu.Lock()
-		delete(h.sessions, key)
-		h.mu.Unlock()
-		return nil, err
+	if cs.session == nil {
+		return nil, fmt.Errorf("session creation failed for %s", info.Name)
 	}
-
-	h.mu.Lock()
-	h.sessions[key] = &cachedSession{
-		info:    info,
-		client:  client,
-		session: session,
-	}
-	h.mu.Unlock()
-
-	return session, nil
+	return cs.session, nil
 }
 
 // fanOutResult holds the result from a single instance call.

@@ -12,7 +12,7 @@ import (
 )
 
 func registerHubTools(srv *mcp.Server, h *Hub) {
-	// list_instances — local only, no fan-out
+	// list_instances — uses liveInstances for consistent discovery
 	srv.AddTool(
 		&mcp.Tool{
 			Name:        "list_instances",
@@ -23,11 +23,21 @@ func registerHubTools(srv *mcp.Server, h *Hub) {
 			},
 		},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			all, _ := discoverAll()
-			if len(all) == 0 {
+			live := h.liveInstances()
+			if len(live) == 0 {
 				return toolText("No logpond instances found."), nil
 			}
-			b, _ := json.MarshalIndent(map[string]any{"instances": all}, "", "  ")
+			var out []instanceStatus
+			for _, info := range live {
+				out = append(out, instanceStatus{
+					Name:      info.Name,
+					Port:      info.Port,
+					PID:       info.PID,
+					Status:    "alive",
+					StartedAt: info.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+				})
+			}
+			b, _ := json.MarshalIndent(map[string]any{"instances": out}, "", "  ")
 			return toolText(string(b)), nil
 		},
 	)
@@ -43,9 +53,9 @@ func registerHubTools(srv *mcp.Server, h *Hub) {
 			},
 		},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			instances := h.liveInstances()
-			if len(instances) == 0 {
-				return toolText("No live instances found."), nil
+			instances, errResult := h.resolveInstances("")
+			if errResult != nil {
+				return errResult, nil
 			}
 			results := h.fanOut(ctx, instances, "stats", nil)
 			return wrapInstances(results), nil
@@ -83,16 +93,9 @@ func registerHubTools(srv *mcp.Server, h *Hub) {
 			limit, _ := args["limit"].(float64)
 			countOnly, _ := args["count_only"].(bool)
 
-			instances := h.liveInstances()
-			if len(instances) == 0 {
-				return toolText("No live instances found."), nil
-			}
-
-			if instanceFilter != "" {
-				instances = filterInstances(instances, instanceFilter)
-				if len(instances) == 0 {
-					return toolText(fmt.Sprintf("Instance %q not found.", instanceFilter)), nil
-				}
+			instances, errResult := h.resolveInstances(instanceFilter)
+			if errResult != nil {
+				return errResult, nil
 			}
 
 			forwardArgs, _ := json.Marshal(args)
@@ -116,9 +119,9 @@ func registerHubTools(srv *mcp.Server, h *Hub) {
 			},
 		},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			instances := h.liveInstances()
-			if len(instances) == 0 {
-				return toolText("No live instances found."), nil
+			instances, errResult := h.resolveInstances("")
+			if errResult != nil {
+				return errResult, nil
 			}
 			results := h.fanOut(ctx, instances, "get_schema", nil)
 			return wrapInstances(results), nil
@@ -152,16 +155,9 @@ func registerHubTools(srv *mcp.Server, h *Hub) {
 				n = int(v)
 			}
 
-			instances := h.liveInstances()
-			if len(instances) == 0 {
-				return toolText("No live instances found."), nil
-			}
-
-			if instanceFilter != "" {
-				instances = filterInstances(instances, instanceFilter)
-				if len(instances) == 0 {
-					return toolText(fmt.Sprintf("Instance %q not found.", instanceFilter)), nil
-				}
+			instances, errResult := h.resolveInstances(instanceFilter)
+			if errResult != nil {
+				return errResult, nil
 			}
 
 			forwardArgs, _ := json.Marshal(args)
@@ -181,37 +177,32 @@ type instanceStatus struct {
 	StartedAt string `json:"started_at"`
 }
 
-func discoverAll() ([]instanceStatus, error) {
-	all, err := registration.Discover()
-	if err != nil {
-		return nil, err
+
+// resolveInstances returns live instances, optionally filtered by name.
+// Returns nil result on success, or an MCP error result if no instances found.
+func (h *Hub) resolveInstances(filter string) ([]registration.InstanceInfo, *mcp.CallToolResult) {
+	instances := h.liveInstances()
+	if len(instances) == 0 {
+		return nil, toolText("No live instances found.")
 	}
-	var out []instanceStatus
-	for _, info := range all {
-		status := "alive"
-		if !registration.IsAlive(info.PID) {
-			status = "dead"
-			registration.DeregisterPID(info.Name, info.PID)
+	if filter != "" {
+		var filtered []registration.InstanceInfo
+		for _, info := range instances {
+			if info.Name == filter {
+				filtered = append(filtered, info)
+			}
 		}
-		out = append(out, instanceStatus{
-			Name:      info.Name,
-			Port:      info.Port,
-			PID:       info.PID,
-			Status:    status,
-			StartedAt: info.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
+		if len(filtered) == 0 {
+			return nil, toolText(fmt.Sprintf("Instance %q not found.", filter))
+		}
+		return filtered, nil
 	}
-	return out, nil
+	return instances, nil
 }
 
-func filterInstances(instances []registration.InstanceInfo, name string) []registration.InstanceInfo {
-	var filtered []registration.InstanceInfo
-	for _, info := range instances {
-		if info.Name == name {
-			filtered = append(filtered, info)
-		}
-	}
-	return filtered
+func fanOutErrorJSON(instance string, err error) json.RawMessage {
+	b, _ := json.Marshal(map[string]string{"instance": instance, "error": err.Error()})
+	return b
 }
 
 func extractText(result *mcp.CallToolResult) string {
@@ -236,11 +227,7 @@ func wrapInstances(results []fanOutResult) *mcp.CallToolResult {
 	var instances []json.RawMessage
 	for _, r := range results {
 		if r.Err != nil {
-			errJSON, _ := json.Marshal(map[string]string{
-				"instance": r.Instance,
-				"error":    r.Err.Error(),
-			})
-			instances = append(instances, errJSON)
+			instances = append(instances, fanOutErrorJSON(r.Instance, r.Err))
 			continue
 		}
 		text := extractText(r.Result)
@@ -258,11 +245,7 @@ func mergeCountOnly(results []fanOutResult) *mcp.CallToolResult {
 	var perInstance []json.RawMessage
 	for _, r := range results {
 		if r.Err != nil {
-			errJSON, _ := json.Marshal(map[string]string{
-				"instance": r.Instance,
-				"error":    r.Err.Error(),
-			})
-			perInstance = append(perInstance, errJSON)
+			perInstance = append(perInstance, fanOutErrorJSON(r.Instance, r.Err))
 			continue
 		}
 		text := extractText(r.Result)
@@ -300,10 +283,7 @@ func mergeEntries(results []fanOutResult, limit int) *mcp.CallToolResult {
 
 	for _, r := range results {
 		if r.Err != nil {
-			errors = append(errors, map[string]string{
-				"instance": r.Instance,
-				"error":    r.Err.Error(),
-			})
+			errors = append(errors, map[string]string{"instance": r.Instance, "error": r.Err.Error()})
 			continue
 		}
 		text := extractText(r.Result)
