@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -146,7 +147,8 @@ func (m *Model) copyEntries() (tea.Model, tea.Cmd) {
 		b.WriteByte('\n')
 	}
 
-	cmd := exec.Command("pbcopy")
+	name, args := clipboardCmd()
+	cmd := exec.Command(name, args...)
 	cmd.Stdin = strings.NewReader(b.String())
 	if err := cmd.Run(); err != nil {
 		m.statusMsg = fmt.Sprintf("Copy failed: %v", err)
@@ -160,6 +162,20 @@ func (m *Model) copyEntries() (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+}
+
+func clipboardCmd() (string, []string) {
+	return clipboardCmdForOS(runtime.GOOS)
+}
+
+func clipboardCmdForOS(goos string) (string, []string) {
+	if goos == "darwin" {
+		return "pbcopy", nil
+	}
+	if _, err := exec.LookPath("xclip"); err == nil {
+		return "xclip", []string{"-selection", "clipboard"}
+	}
+	return "xsel", []string{"--clipboard", "--input"}
 }
 
 func (m *Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

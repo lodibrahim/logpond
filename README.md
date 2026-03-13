@@ -12,6 +12,7 @@ your-app 2>&1 | logpond --config ./config.yaml
 
 - **TUI** — Column-based log viewer with live scrolling, search, and copy
 - **MCP Server** — AI agents query your logs via `stats`, `search_logs`, `tail`, `get_schema`
+- **Hub** — Auto-spawning aggregator discovers all running instances, one MCP endpoint for all services
 - **Config-driven** — YAML defines columns, field mappings, and MCP behavior
 - **Ring buffer** — Fixed-capacity circular buffer (default 50k entries), zero-copy iteration
 - **Generic** — Works with any JSON log format, not tied to any specific app or framework
@@ -61,6 +62,8 @@ columns:
 my-app 2>&1 | logpond --config ./config.yaml
 ```
 
+The first instance auto-spawns the **hub** on port 9800. No extra setup.
+
 ### 3. Use the TUI
 
 | Key | Action |
@@ -75,27 +78,64 @@ my-app 2>&1 | logpond --config ./config.yaml
 
 Mouse wheel scrolling is also supported.
 
-### 4. Query via MCP
+### 4. Connect your AI agent
 
-While logpond is running, AI agents can connect to `http://localhost:9876/mcp`:
+Point your AI agent at the hub (not the individual instance):
 
-```bash
-# Claude Code — add to .mcp.json in your project root:
+```json
+// .mcp.json (Claude Code)
 {
   "mcpServers": {
     "logpond": {
       "type": "http",
-      "url": "http://localhost:9876/mcp"
+      "url": "http://localhost:9800/mcp"
     }
   }
 }
 ```
 
-## MCP Tools
+The hub discovers all running logpond instances automatically. Start more services, they appear. Stop them, they disappear.
+
+## Hub
+
+The hub is an MCP aggregator that sits in front of all logpond instances.
+
+### How it works
+
+1. First logpond instance checks if port 9800 is open
+2. If not, spawns `logpond hub` as a detached background process
+3. Each instance registers itself in `~/.logpond/<name>-<pid>.json`
+4. Hub discovers instances on every query (no polling)
+5. Hub shuts down after 60s with no live instances
+
+### Hub tools
+
+All tools fan out to every live instance and merge results:
+
+- **`list_instances`** — show all discovered instances with status
+- **`stats`** — merged severity breakdown, field values, time range per instance
+- **`search_logs`** — search across all instances, results interleaved by timestamp
+- **`get_schema`** — all instance schemas and contexts in one call
+- **`tail`** — last N entries merged across all instances
+
+Use the `instance` parameter on `search_logs` and `tail` to target a specific service.
+
+### Manual hub
+
+The hub is normally auto-spawned, but you can start it manually:
+
+```bash
+logpond hub              # default port 9800
+logpond hub --port 9900  # custom port
+```
+
+## Instance MCP Tools
+
+Each logpond instance also exposes its own MCP endpoint (default port 9876):
 
 ### `stats`
 
-Quick overview — total entries, severity breakdown, active field values, time range. An agent should call this first.
+Quick overview — total entries, severity breakdown, active field values, time range.
 
 ```json
 {
@@ -104,8 +144,7 @@ Quick overview — total entries, severity breakdown, active field values, time 
   "time_range": { "oldest": "...", "newest": "..." },
   "severity": { "INFO": 1365, "WARN": 50, "DEBUG": 316 },
   "fields": {
-    "component": [{ "value": "engine", "count": 578 }, ...],
-    "symbol": [{ "value": "NVDA", "count": 1670 }]
+    "component": [{ "value": "engine", "count": 578 }]
   }
 }
 ```
@@ -185,54 +224,74 @@ columns:
 
 | Source | Example | Description |
 |--------|---------|-------------|
-| `timestamp` | — | Parsed timestamp |
-| `severity` | — | Log level |
-| `body` | — | Log message |
+| `timestamp` | -- | Parsed timestamp |
+| `severity` | -- | Log level |
+| `body` | -- | Log message |
 | `field:<name>` | `field:service` | Top-level JSON field |
 | `span_field:<name>` | `span_field:trace_id` | Field from `spans[]` array |
 
-## CLI Flags
+## CLI
 
 ```
---config     Path to YAML config file (required)
---buffer     Ring buffer capacity (default: 50000)
---mcp-port   MCP server port (default: 9876)
---name       Instance name override (default: from config)
+# Instance mode (pipe logs)
+app 2>&1 | logpond --config ./config.yaml [flags]
+
+Flags:
+  --config     Path to YAML config file (required)
+  --buffer     Ring buffer capacity (default: 50000)
+  --mcp-port   MCP server port (default: 9876)
+  --name       Instance name override (default: from config)
+
+# Hub mode (aggregator)
+logpond hub [flags]
+
+Flags:
+  --port       Hub MCP server port (default: 9800)
 ```
 
 ## Architecture
 
 ```
-stdin (JSON lines)
-    │
-    ▼
-┌─────────┐     ┌───────────┐     ┌─────────────┐
-│  Parser  │────▶│   Store   │◀────│  MCP Server  │
-│          │     │ (ring buf)│     │  :9876/mcp   │
-└─────────┘     └─────┬─────┘     └─────────────┘
-                      │
-                      ▼
-                ┌───────────┐
-                │    TUI    │
-                │ (alt screen)│
-                └───────────┘
+                        ┌──────────────────────────┐
+                        │    Hub (:9800/mcp)        │
+                        │    Auto-spawned by first  │
+                        │    instance. Fans out     │
+                        │    queries to all live    │
+                        │    instances.             │
+                        └─────┬──────────┬─────────┘
+                              │          │
+               ┌──────────────┘          └──────────────┐
+               ▼                                        ▼
+  ┌─────────────────────────┐          ┌─────────────────────────┐
+  │  Instance A (:9876)     │          │  Instance B (:9877)     │
+  │                         │          │                         │
+  │  stdin ─▶ Parser        │          │  stdin ─▶ Parser        │
+  │            ▼            │          │            ▼            │
+  │          Store ◀── MCP  │          │          Store ◀── MCP  │
+  │            ▼            │          │            ▼            │
+  │           TUI           │          │           TUI           │
+  └─────────────────────────┘          └─────────────────────────┘
+
+  ~/.logpond/app-a-1234.json           ~/.logpond/app-b-5678.json
 ```
 
-- **Parser** reads JSON from stdin, extracts fields per config
-- **Store** holds entries in a thread-safe ring buffer
-- **TUI** renders columns with live search and scrolling (reads keyboard from `/dev/tty`)
-- **MCP Server** exposes search, stats, tail, and schema tools over HTTP
+- **Hub** discovers instances via `~/.logpond/*.json` registration files
+- **Instances** register on startup, deregister on exit
+- **AI agent** connects to hub once — sees all services
 
-## Multiple Instances
+## Multiple Services
 
-Run multiple logpond instances for different services:
+Just pipe each service through its own logpond instance:
 
 ```bash
-app-a 2>&1 | logpond --config ./a.yaml --mcp-port 9876
-app-b 2>&1 | logpond --config ./b.yaml --mcp-port 9877
+# Terminal 1
+api-server 2>&1 | logpond --config ./api.yaml
+
+# Terminal 2
+worker 2>&1 | logpond --config ./worker.yaml --mcp-port 9877
 ```
 
-Each instance is identified by its config `name` in MCP responses, so AI agents know which service they're querying.
+Each instance gets its own TUI, its own config, and its own columns. The hub merges them all — the AI agent sees everything from one endpoint.
 
 ## License
 
