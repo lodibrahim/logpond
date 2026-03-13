@@ -1,9 +1,20 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lodibrahim/logpond/internal/config"
+	mcpsvr "github.com/lodibrahim/logpond/internal/mcp"
+	"github.com/lodibrahim/logpond/internal/parser"
+	"github.com/lodibrahim/logpond/internal/store"
+	"github.com/lodibrahim/logpond/internal/tui"
 )
 
 func main() {
@@ -17,12 +28,71 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Check stdin is a pipe, not a terminal
+	// Check stdin is a pipe
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) != 0 {
 		fmt.Fprintln(os.Stderr, "usage: app | logpond --config ./config.yaml")
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stderr, "logpond: config=%s buffer=%d mcp-port=%d\n", *configPath, *bufferSize, *mcpPort)
+	// Load config
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create components
+	p := parser.New(cfg)
+	st := store.New(*bufferSize)
+
+	// Create TUI
+	model := tui.New(cfg, p, st)
+	program := tea.NewProgram(model, tea.WithAltScreen())
+
+	// Context for shutdown coordination
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Bind MCP server port synchronously (fail fast on port conflict)
+	mcp := mcpsvr.New(cfg, st, *mcpPort)
+	ln, err := mcp.Listen()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logpond: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "logpond: MCP server on http://localhost:%d/mcp\n", *mcpPort)
+
+	// Start MCP server in background
+	go func() {
+		if err := mcp.Serve(ctx, ln); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "logpond: MCP server error: %v\n", err)
+		}
+	}()
+
+	// Start stdin reader
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		// Increase buffer for long JSON lines
+		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			entry, err := p.Parse(line)
+			if err != nil {
+				continue // skip non-JSON lines
+			}
+			st.Append(entry)
+			program.Send(tui.NewEntryMsg{})
+		}
+		program.Send(tui.InputClosedMsg{})
+	}()
+
+	// Run TUI (blocks until quit)
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Shutdown
+	cancel()
 }
