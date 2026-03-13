@@ -2,22 +2,32 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lodibrahim/logpond/internal/config"
 	"github.com/lodibrahim/logpond/internal/parser"
 )
 
 var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	expandStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	cursorStyle  = lipgloss.NewStyle().Reverse(true)
+	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252"))
+	statusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	searchStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	searchActive = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	// Severity styles — for Level column (256-color safe for Solarized)
+	sevInfoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("71"))  // green
+	sevWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // bright yellow
+	sevErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203")) // bright red
+	sevDebugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
+
+	// Severity tints — for Message column
+	msgErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("174")) // soft red
+	msgDebugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
+
+	// Column styles (256-color safe)
+	timeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
 )
 
 func renderView(m *Model) string {
@@ -25,47 +35,48 @@ func renderView(m *Model) string {
 		return "loading..."
 	}
 
-	if m.expanded && m.expandIdx >= 0 {
-		return renderExpanded(m)
-	}
-
 	var b strings.Builder
 
 	b.WriteString(renderHeaderRow(m))
 	b.WriteByte('\n')
 
-	b.WriteString(strings.Repeat("─", m.width))
-	b.WriteByte('\n')
+	if m.filterMode || m.filterQuery != nil {
+		b.WriteString(renderSearchBar(m))
+		b.WriteByte('\n')
+	}
 
 	entries := m.visibleEntries()
 	tableH := m.tableHeight()
 
-	startIdx := len(entries) - m.offset - tableH
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	endIdx := len(entries) - m.offset
-	if endIdx > len(entries) {
-		endIdx = len(entries)
-	}
-
-	for i := startIdx; i < endIdx; i++ {
-		row := renderRow(m, entries[i])
-		// Highlight the cursor row (cursor 0 = bottom visible row)
-		rowFromBottom := endIdx - 1 - i
-		if rowFromBottom == m.cursor {
-			row = cursorStyle.Render(row)
+	if m.filterQuery != nil && len(entries) == 0 {
+		// Active filter with no matches
+		b.WriteString(sevWarnStyle.Render("No matches"))
+		b.WriteByte('\n')
+		for i := 1; i < tableH; i++ {
+			b.WriteByte('\n')
 		}
-		b.WriteString(row)
-		b.WriteByte('\n')
+	} else {
+		startIdx := len(entries) - m.offset - tableH
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := len(entries) - m.offset
+		if endIdx > len(entries) {
+			endIdx = len(entries)
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			b.WriteString(renderRow(m, entries[i]))
+			b.WriteByte('\n')
+		}
+
+		rendered := endIdx - startIdx
+		for i := rendered; i < tableH; i++ {
+			b.WriteByte('\n')
+		}
 	}
 
-	rendered := endIdx - startIdx
-	for i := rendered; i < tableH; i++ {
-		b.WriteByte('\n')
-	}
-
-	b.WriteString(renderStatusBar(m))
+	b.WriteString(renderBottomPanel(m))
 
 	return b.String()
 }
@@ -96,69 +107,132 @@ func renderRow(m *Model, entry *parser.Entry) string {
 			cell = cells[i]
 		}
 		cell = padOrTrunc(cell, w)
+		cell = colorCell(i, col, entry.Severity, cell)
 		parts = append(parts, cell)
 	}
-
-	line := strings.Join(parts, " ")
-	line = colorBySeverity(entry.Severity, line)
-	return line
+	return strings.Join(parts, " ")
 }
 
-func renderExpanded(m *Model) string {
-	entries := m.visibleEntries()
-	if m.expandIdx >= len(entries) {
-		return ""
+func colorCell(colIdx int, col config.ColumnConfig, severity, cell string) string {
+	switch col.SourceType() {
+	case "timestamp":
+		return timeStyle.Render(cell)
+	case "severity":
+		return colorSeverity(severity, cell)
+	case "body":
+		return colorMessage(severity, cell)
+	case "span_field", "field":
+		return colorField(colIdx, cell)
+	default:
+		return cell
 	}
-	entry := entries[m.expandIdx]
-
-	var b strings.Builder
-	b.WriteString(expandStyle.Render("── Log Entry Detail ──"))
-	b.WriteByte('\n')
-	b.WriteString(fmt.Sprintf("  Time:     %s\n", entry.Timestamp.Format("15:04:05.000")))
-	b.WriteString(fmt.Sprintf("  Level:    %s\n", entry.Severity))
-	b.WriteString(fmt.Sprintf("  Body:     %s\n", entry.Body))
-	b.WriteByte('\n')
-
-	keys := make([]string, 0, len(entry.Fields))
-	for k := range entry.Fields {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	b.WriteString(expandStyle.Render("  Fields:"))
-	b.WriteByte('\n')
-	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("    %s = %s\n", k, entry.Fields[k]))
-	}
-	b.WriteByte('\n')
-	b.WriteString(statusStyle.Render("  Press Enter to close"))
-	return b.String()
 }
 
-func renderStatusBar(m *Model) string {
-	var left string
+func colorSeverity(severity, cell string) string {
+	switch strings.ToUpper(severity) {
+	case "WARN", "WARNING":
+		return sevWarnStyle.Render(cell)
+	case "ERROR", "FATAL":
+		return sevErrorStyle.Render(cell)
+	case "DEBUG", "TRACE":
+		return sevDebugStyle.Render(cell)
+	default:
+		return sevInfoStyle.Render(cell)
+	}
+}
+
+func colorMessage(severity, cell string) string {
+	switch strings.ToUpper(severity) {
+	case "ERROR", "FATAL":
+		return msgErrorStyle.Render(cell)
+	case "DEBUG", "TRACE":
+		return msgDebugStyle.Render(cell)
+	default:
+		return cell
+	}
+}
+
+var fieldColors = []lipgloss.Style{
+	lipgloss.NewStyle().Foreground(lipgloss.Color("75")),  // cyan
+	lipgloss.NewStyle().Foreground(lipgloss.Color("176")), // magenta
+	lipgloss.NewStyle().Foreground(lipgloss.Color("110")), // blue
+	lipgloss.NewStyle().Foreground(lipgloss.Color("150")), // olive
+	lipgloss.NewStyle().Foreground(lipgloss.Color("216")), // peach
+	lipgloss.NewStyle().Foreground(lipgloss.Color("114")), // teal
+}
+
+func colorField(colIdx int, cell string) string {
+	if strings.TrimSpace(cell) == "" {
+		return cell
+	}
+	return fieldColors[colIdx%len(fieldColors)].Render(cell)
+}
+
+func renderSearchBar(m *Model) string {
 	if m.filterMode {
-		left = fmt.Sprintf("Filter: /%s█", m.filterInput)
-	} else if m.filterQuery != nil {
-		left = fmt.Sprintf("Filter: /%s", m.filterQuery.Text)
+		return searchActive.Render(fmt.Sprintf("Search: %s█", m.filterInput))
+	}
+	if m.filterQuery != nil {
+		return searchActive.Render(fmt.Sprintf("Search: %s  (Esc to clear)", m.filterQuery.Text))
+	}
+	return searchStyle.Render("Search: press / to filter")
+}
+
+var (
+	keyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("110")).Bold(true)
+	descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	msgStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("71"))
+)
+
+func renderBottomPanel(m *Model) string {
+	var b strings.Builder
+
+	// Line 1: separator
+	b.WriteString(statusStyle.Render(strings.Repeat("─", m.width)))
+	b.WriteByte('\n')
+
+	// Line 2: shortcuts or status message
+	if m.statusMsg != "" {
+		b.WriteString(msgStyle.Render(m.statusMsg))
+	} else {
+		shortcuts := []struct{ key, desc string }{
+			{"/", "search"},
+			{"Esc", "clear"},
+			{"y", "copy"},
+			{"c", "clear logs"},
+			{"k/j", "scroll"},
+			{"g/G", "top/tail"},
+			{"q", "quit"},
+		}
+		var parts []string
+		for _, s := range shortcuts {
+			parts = append(parts, keyStyle.Render(s.key)+" "+descStyle.Render(s.desc))
+		}
+		b.WriteString(strings.Join(parts, statusStyle.Render("  |  ")))
 	}
 
+	// Pad to width and add entry count on the right
 	total := m.store.Len()
 	right := fmt.Sprintf("%d entries", total)
 	if m.inputClosed {
-		right = fmt.Sprintf("%d entries (input closed)", total)
+		right = fmt.Sprintf("%d entries (closed)", total)
 	}
 	if m.filtered != nil {
-		right = fmt.Sprintf("%d/%d entries", len(m.filtered), total)
+		right = fmt.Sprintf("%d/%d", len(m.filtered), total)
 	}
+	right = statusStyle.Render(right)
 
-	leftW := len([]rune(left))
-	rightW := len([]rune(right))
-	gap := m.width - leftW - rightW
+	// Calculate gap for right-alignment on line 2
+	lineW := lipgloss.Width(b.String()) - lipgloss.Width(statusStyle.Render(strings.Repeat("─", m.width))) - 1
+	rightW := lipgloss.Width(right)
+	gap := m.width - lineW - rightW
 	if gap < 1 {
 		gap = 1
 	}
-	return statusStyle.Render(left + strings.Repeat(" ", gap) + right)
+	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(right)
+
+	return b.String()
 }
 
 func flexWidth(m *Model) int {
@@ -187,15 +261,3 @@ func padOrTrunc(s string, w int) string {
 	return s + strings.Repeat(" ", w-len(runes))
 }
 
-func colorBySeverity(severity, line string) string {
-	switch severity {
-	case "WARN":
-		return warnStyle.Render(line)
-	case "ERROR", "FATAL":
-		return errorStyle.Render(line)
-	case "DEBUG", "TRACE":
-		return debugStyle.Render(line)
-	default:
-		return line
-	}
-}

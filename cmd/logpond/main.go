@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -21,6 +22,7 @@ func main() {
 	configPath := flag.String("config", "", "Path to YAML config file (required)")
 	bufferSize := flag.Int("buffer", 50000, "Ring buffer capacity")
 	mcpPort := flag.Int("mcp-port", 9876, "MCP server port")
+	name := flag.String("name", "logpond", "Instance name (shown in MCP responses)")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -50,30 +52,26 @@ func main() {
 	p := parser.New(cfg)
 	st := store.New(*bufferSize)
 
-	// Open /dev/tty for keyboard input (stdin is the log pipe)
-	tty, err := os.Open("/dev/tty")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot open /dev/tty: %v\n", err)
-		os.Exit(1)
-	}
-	defer tty.Close()
-
-	// Create TUI
+	// Create TUI — WithInputTTY opens /dev/tty for keyboard input (stdin is the pipe)
 	model := tui.New(cfg, p, st)
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithInput(tty))
+	program := tea.NewProgram(model,
+		tea.WithAltScreen(),
+		tea.WithInputTTY(),
+		tea.WithMouseCellMotion(),
+	)
 
 	// Context for shutdown coordination
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Bind MCP server port synchronously (fail fast on port conflict)
-	mcp := mcpsvr.New(cfg, st, *mcpPort)
+	mcp := mcpsvr.New(cfg, st, *mcpPort, *name)
 	ln, err := mcp.Listen()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logpond: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "logpond: MCP server on http://localhost:%d/mcp\n", *mcpPort)
+	fmt.Fprintf(os.Stderr, "logpond [%s]: MCP server on http://localhost:%d/mcp\n", *name, *mcpPort)
 
 	// Start MCP server in background
 	go func() {
@@ -102,10 +100,17 @@ func main() {
 		program.Send(tui.InputClosedMsg{})
 	}()
 
+	// Handle SIGINT for clean exit
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt)
+		<-sig
+		cancel()
+		program.Kill()
+	}()
+
 	// Run TUI (blocks until quit)
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
 	}
-
 }

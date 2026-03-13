@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lodibrahim/logpond/internal/config"
@@ -15,6 +20,9 @@ type NewEntryMsg struct{}
 // InputClosedMsg signals stdin has closed.
 type InputClosedMsg struct{}
 
+// clearStatusMsg clears the temporary status message.
+type clearStatusMsg struct{}
+
 // Model is the bubbletea TUI model.
 type Model struct {
 	cfg    *config.Config
@@ -23,9 +31,8 @@ type Model struct {
 
 	// View state
 	width, height int
-	offset        int // scroll offset from bottom
-	cursor        int // selected row index within visible entries (0 = bottom)
-	atBottom      bool
+	offset   int // scroll offset from bottom
+	atBottom bool
 
 	// Filter
 	filterMode  bool
@@ -33,13 +40,10 @@ type Model struct {
 	filterQuery *search.Query
 	filtered    []*parser.Entry
 
-	// Expand
-	expandIdx int // -1 = none
-	expanded  bool
-
 	// Status
 	inputClosed bool
 	lastCount   int
+	statusMsg   string
 }
 
 // New creates a new TUI model.
@@ -48,8 +52,7 @@ func New(cfg *config.Config, p *parser.Parser, s *store.Store) *Model {
 		cfg:       cfg,
 		parser:    p,
 		store:     s,
-		atBottom:  true,
-		expandIdx: -1,
+		atBottom: true,
 	}
 }
 
@@ -72,10 +75,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inputClosed = true
 		return m, nil
 
+	case clearStatusMsg:
+		m.statusMsg = ""
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 
+	return m, nil
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.scrollUp()
+	case tea.MouseButtonWheelDown:
+		m.scrollDown()
+	}
 	return m, nil
 }
 
@@ -100,43 +120,113 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterInput = ""
 	case "esc":
 		m.clearFilter()
-	case "enter":
-		m.toggleExpand()
+	case "y":
+		return m.copyEntries()
+	case "c":
+		m.store.Clear()
+		m.clearFilter()
+		m.statusMsg = "Logs cleared"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
 	}
 
 	return m, nil
 }
 
+func (m *Model) copyEntries() (tea.Model, tea.Cmd) {
+	entries := m.visibleEntries()
+	if len(entries) == 0 {
+		m.statusMsg = "Nothing to copy"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+	}
+
+	var b strings.Builder
+	for _, e := range entries {
+		cells := m.parser.ResolveColumns(e)
+		b.WriteString(strings.Join(cells, "\t"))
+		b.WriteByte('\n')
+	}
+
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(b.String())
+	if err := cmd.Run(); err != nil {
+		m.statusMsg = fmt.Sprintf("Copy failed: %v", err)
+	} else {
+		count := len(entries)
+		if m.filterQuery != nil {
+			m.statusMsg = fmt.Sprintf("Copied %d filtered entries", count)
+		} else {
+			m.statusMsg = fmt.Sprintf("Copied %d entries", count)
+		}
+	}
+
+	return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+}
+
 func (m *Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
-		m.applyFilter()
 		m.filterMode = false
 		return m, nil
 	case tea.KeyEsc:
 		m.filterMode = false
-		m.filterInput = ""
+		m.clearFilter()
 		return m, nil
 	case tea.KeyBackspace:
 		runes := []rune(m.filterInput)
 		if len(runes) > 0 {
 			m.filterInput = string(runes[:len(runes)-1])
 		}
-		return m, nil
 	case tea.KeyRunes:
 		m.filterInput += string(msg.Runes)
-		return m, nil
 	case tea.KeySpace:
 		m.filterInput += " "
-		return m, nil
 	default:
 		return m, nil
 	}
+	// Live search: apply filter on every keystroke
+	m.liveFilter()
+	return m, nil
+}
+
+func (m *Model) liveFilter() {
+	if m.filterInput == "" {
+		m.filterQuery = nil
+		m.filtered = nil
+		m.offset = 0
+		m.atBottom = true
+		return
+	}
+	q := &search.Query{Text: m.filterInput}
+	results, err := search.Run(m.store, *q)
+	if err != nil {
+		// Invalid regex while typing — keep previous results
+		return
+	}
+	m.filterQuery = q
+	if results == nil {
+		results = []*parser.Entry{} // empty, not nil — distinguishes "no matches" from "no filter"
+	}
+	m.filtered = results
+	m.offset = 0
+	m.atBottom = true
 }
 
 func (m *Model) refreshEntries() {
+	newCount := m.store.Len()
+
+	// When scrolled up, adjust offset so the view stays pinned to the same entries
+	if !m.atBottom && m.lastCount > 0 {
+		added := newCount - m.lastCount
+		if added > 0 {
+			m.offset += added
+		}
+	}
+
 	if m.filterQuery != nil {
 		results, _ := search.Run(m.store, *m.filterQuery)
+		if results == nil {
+			results = []*parser.Entry{}
+		}
 		m.filtered = results
 	} else {
 		m.filtered = nil
@@ -144,7 +234,7 @@ func (m *Model) refreshEntries() {
 	if m.atBottom {
 		m.offset = 0
 	}
-	m.lastCount = m.store.Len()
+	m.lastCount = newCount
 }
 
 func (m *Model) visibleEntries() []*parser.Entry {
@@ -155,7 +245,11 @@ func (m *Model) visibleEntries() []*parser.Entry {
 }
 
 func (m *Model) tableHeight() int {
-	h := m.height - 3
+	chrome := 3 // header + separator + shortcuts
+	if m.filterMode || m.filterQuery != nil {
+		chrome = 4 // + search bar
+	}
+	h := m.height - chrome
 	if h < 1 {
 		h = 1
 	}
@@ -163,12 +257,10 @@ func (m *Model) tableHeight() int {
 }
 
 func (m *Model) scrollDown() {
-	if m.cursor > 0 {
-		m.cursor--
-	} else if m.offset > 0 {
+	if m.offset > 0 {
 		m.offset--
 	}
-	if m.offset == 0 && m.cursor == 0 {
+	if m.offset == 0 {
 		m.atBottom = true
 	}
 }
@@ -176,24 +268,18 @@ func (m *Model) scrollDown() {
 func (m *Model) scrollUp() {
 	entries := m.visibleEntries()
 	tableH := m.tableHeight()
-	if m.cursor < tableH-1 && m.cursor < len(entries)-1 {
-		m.cursor++
+	maxOffset := len(entries) - tableH
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.offset < maxOffset {
+		m.offset++
 		m.atBottom = false
-	} else {
-		maxOffset := len(entries) - tableH
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
-		if m.offset < maxOffset {
-			m.offset++
-			m.atBottom = false
-		}
 	}
 }
 
 func (m *Model) scrollToBottom() {
 	m.offset = 0
-	m.cursor = 0
 	m.atBottom = true
 }
 
@@ -204,7 +290,6 @@ func (m *Model) scrollToTop() {
 		maxOffset = 0
 	}
 	m.offset = maxOffset
-	m.cursor = 0
 	m.atBottom = false
 }
 
@@ -232,27 +317,6 @@ func (m *Model) clearFilter() {
 	m.filterInput = ""
 	m.offset = 0
 	m.atBottom = true
-}
-
-func (m *Model) toggleExpand() {
-	if m.expanded {
-		m.expanded = false
-		m.expandIdx = -1
-		return
-	}
-	entries := m.visibleEntries()
-	if len(entries) == 0 {
-		return
-	}
-	idx := len(entries) - m.offset - 1 - m.cursor
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(entries) {
-		idx = len(entries) - 1
-	}
-	m.expandIdx = idx
-	m.expanded = true
 }
 
 func (m *Model) View() string {

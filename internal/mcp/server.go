@@ -18,7 +18,7 @@ type Server struct {
 	port       int
 }
 
-func New(cfg *config.Config, st *store.Store, port int) *Server {
+func New(cfg *config.Config, st *store.Store, port int, name string) *Server {
 	mcpSrv := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "logpond",
@@ -27,7 +27,7 @@ func New(cfg *config.Config, st *store.Store, port int) *Server {
 		nil,
 	)
 
-	registerTools(mcpSrv, cfg, st)
+	registerTools(mcpSrv, cfg, st, name)
 
 	handler := mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server { return mcpSrv },
