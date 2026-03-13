@@ -5,11 +5,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -98,6 +100,9 @@ func main() {
 	}
 	defer registration.Deregister(instanceName)
 
+	// Auto-spawn hub if not already running
+	ensureHub()
+
 	// Start MCP server in background
 	go func() {
 		if err := mcp.Serve(ctx, ln); err != nil && err != http.ErrServerClosed {
@@ -142,24 +147,7 @@ func main() {
 func runHub() {
 	fs := flag.NewFlagSet("hub", flag.ExitOnError)
 	port := fs.Int("port", 9800, "Hub MCP server port")
-	install := fs.Bool("install", false, "Install hub as launchd service (starts on login)")
-	uninstall := fs.Bool("uninstall", false, "Uninstall hub launchd service")
 	fs.Parse(os.Args[2:])
-
-	if *install {
-		if err := installLaunchd(*port); err != nil {
-			fmt.Fprintf(os.Stderr, "logpond hub: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if *uninstall {
-		if err := uninstallLaunchd(); err != nil {
-			fmt.Fprintf(os.Stderr, "logpond hub: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -178,70 +166,31 @@ func runHub() {
 	}
 }
 
-const launchdLabel = "com.logpond.hub"
+const defaultHubPort = 9800
 
-func launchdPlistPath() string {
-	home, _ := os.UserHomeDir()
-	return home + "/Library/LaunchAgents/" + launchdLabel + ".plist"
-}
+// ensureHub checks if the hub is running on the default port.
+// If not, it spawns one as a detached background process.
+func ensureHub() {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", defaultHubPort), 200*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return // hub already running
+	}
 
-func installLaunchd(port int) error {
 	binPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("cannot find logpond binary: %w", err)
+		return // silently skip
 	}
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>%s</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-        <string>hub</string>
-        <string>--port</string>
-        <string>%d</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardErrorPath</key>
-    <string>/tmp/logpond-hub.log</string>
-    <key>StandardOutPath</key>
-    <string>/tmp/logpond-hub.log</string>
-</dict>
-</plist>`, launchdLabel, binPath, port)
-
-	path := launchdPlistPath()
-	if err := os.WriteFile(path, []byte(plist), 0644); err != nil {
-		return fmt.Errorf("write plist: %w", err)
+	cmd := exec.Command(binPath, "hub", "--port", fmt.Sprintf("%d", defaultHubPort))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "logpond: warning: failed to start hub: %v\n", err)
+		return
 	}
-
-	cmd := exec.Command("launchctl", "load", path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl load: %s (%w)", string(out), err)
-	}
-
-	fmt.Fprintf(os.Stderr, "logpond hub: installed and started (port %d)\n", port)
-	fmt.Fprintf(os.Stderr, "  plist: %s\n", path)
-	fmt.Fprintf(os.Stderr, "  logs:  /tmp/logpond-hub.log\n")
-	fmt.Fprintf(os.Stderr, "  MCP:   http://localhost:%d/mcp\n", port)
-	return nil
-}
-
-func uninstallLaunchd() error {
-	path := launchdPlistPath()
-
-	cmd := exec.Command("launchctl", "unload", path)
-	cmd.Run() //nolint:errcheck
-
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove plist: %w", err)
-	}
-
-	fmt.Fprintln(os.Stderr, "logpond hub: uninstalled")
-	return nil
+	// Release the child so it survives after this process exits
+	cmd.Process.Release()
+	fmt.Fprintf(os.Stderr, "logpond: hub started on http://localhost:%d/mcp\n", defaultHubPort)
 }
