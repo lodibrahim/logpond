@@ -19,12 +19,16 @@ type InstanceInfo struct {
 }
 
 var (
-	dirOnce  sync.Once
-	dirPath  string
-	dirError error
+	dirOnce    sync.Once
+	dirPath    string
+	dirError   error
+	dirOverride string // set by tests only
 )
 
 func dir() (string, error) {
+	if dirOverride != "" {
+		return dirOverride, os.MkdirAll(dirOverride, 0755)
+	}
 	dirOnce.Do(func() {
 		home, err := os.UserHomeDir()
 		if err != nil {
