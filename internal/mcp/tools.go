@@ -113,7 +113,7 @@ func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store, name st
 			Name:        "tail",
 			Description: "Return the last N log entries.",
 			InputSchema: map[string]any{
-				"type":       "object",
+				"type": "object",
 				"properties": map[string]any{
 					"n": map[string]any{"type": "integer", "description": "Number of entries to return (default: 10)"},
 				},
@@ -297,11 +297,11 @@ func availableFieldNames(cfg *config.Config) []string {
 }
 
 type statsResult struct {
-	Instance   string                   `json:"instance"`
-	Total      int                      `json:"total_entries"`
-	TimeRange  *timeRange               `json:"time_range,omitempty"`
-	Severity   map[string]int           `json:"severity"`
-	FieldStats map[string][]fieldCount  `json:"fields"`
+	Instance   string                  `json:"instance"`
+	Total      int                     `json:"total_entries"`
+	TimeRange  *timeRange              `json:"time_range,omitempty"`
+	Severity   map[string]int          `json:"severity"`
+	FieldStats map[string][]fieldCount `json:"fields"`
 }
 
 type timeRange struct {
@@ -352,9 +352,9 @@ func buildStats(cfg *config.Config, st *store.Store, instance string) statsResul
 	})
 
 	result := statsResult{
-		Instance: instance,
-		Total:    total,
-		Severity: severity,
+		Instance:   instance,
+		Total:      total,
+		Severity:   severity,
 		FieldStats: make(map[string][]fieldCount),
 	}
 

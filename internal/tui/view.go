@@ -260,4 +260,3 @@ func padOrTrunc(s string, w int) string {
 	}
 	return s + strings.Repeat(" ", w-len(runes))
 }
-

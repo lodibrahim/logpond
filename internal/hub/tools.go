@@ -177,7 +177,6 @@ type instanceStatus struct {
 	StartedAt string `json:"started_at"`
 }
 
-
 // resolveInstances returns live instances, optionally filtered by name.
 // Returns nil result on success, or an MCP error result if no instances found.
 func (h *Hub) resolveInstances(filter string) ([]registration.InstanceInfo, *mcp.CallToolResult) {
@@ -323,8 +322,8 @@ func mergeEntries(results []fanOutResult, limit int) *mcp.CallToolResult {
 	}
 
 	result := struct {
-		Count   int               `json:"count"`
-		Entries []mergedEntry     `json:"entries"`
+		Count   int                 `json:"count"`
+		Entries []mergedEntry       `json:"entries"`
 		Errors  []map[string]string `json:"errors,omitempty"`
 	}{
 		Count:   len(allEntries),

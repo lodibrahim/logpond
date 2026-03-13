@@ -19,9 +19,9 @@ type InstanceInfo struct {
 }
 
 var (
-	dirOnce    sync.Once
-	dirPath    string
-	dirError   error
+	dirOnce     sync.Once
+	dirPath     string
+	dirError    error
 	dirOverride string // set by tests only
 )
 
