@@ -6,17 +6,28 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lodibrahim/logpond/internal/config"
 	"github.com/lodibrahim/logpond/internal/parser"
 )
 
 var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	searchStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	searchActive = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252"))
+	statusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	searchStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	searchActive = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	// Severity styles — for Level column (256-color safe for Solarized)
+	sevInfoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("71"))  // green
+	sevWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // bright yellow
+	sevErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203")) // bright red
+	sevDebugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
+
+	// Severity tints — for Message column
+	msgErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("174")) // soft red
+	msgDebugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
+
+	// Column styles (256-color safe)
+	timeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246")) // medium gray
 )
 
 func renderView(m *Model) string {
@@ -39,7 +50,7 @@ func renderView(m *Model) string {
 
 	if m.filterQuery != nil && len(entries) == 0 {
 		// Active filter with no matches
-		b.WriteString(warnStyle.Render("No matches"))
+		b.WriteString(sevWarnStyle.Render("No matches"))
 		b.WriteByte('\n')
 		for i := 1; i < tableH; i++ {
 			b.WriteByte('\n')
@@ -96,12 +107,65 @@ func renderRow(m *Model, entry *parser.Entry) string {
 			cell = cells[i]
 		}
 		cell = padOrTrunc(cell, w)
+		cell = colorCell(i, col, entry.Severity, cell)
 		parts = append(parts, cell)
 	}
+	return strings.Join(parts, " ")
+}
 
-	line := strings.Join(parts, " ")
-	line = colorBySeverity(entry.Severity, line)
-	return line
+func colorCell(colIdx int, col config.ColumnConfig, severity, cell string) string {
+	switch col.SourceType() {
+	case "timestamp":
+		return timeStyle.Render(cell)
+	case "severity":
+		return colorSeverity(severity, cell)
+	case "body":
+		return colorMessage(severity, cell)
+	case "span_field", "field":
+		return colorField(colIdx, cell)
+	default:
+		return cell
+	}
+}
+
+func colorSeverity(severity, cell string) string {
+	switch strings.ToUpper(severity) {
+	case "WARN", "WARNING":
+		return sevWarnStyle.Render(cell)
+	case "ERROR", "FATAL":
+		return sevErrorStyle.Render(cell)
+	case "DEBUG", "TRACE":
+		return sevDebugStyle.Render(cell)
+	default:
+		return sevInfoStyle.Render(cell)
+	}
+}
+
+func colorMessage(severity, cell string) string {
+	switch strings.ToUpper(severity) {
+	case "ERROR", "FATAL":
+		return msgErrorStyle.Render(cell)
+	case "DEBUG", "TRACE":
+		return msgDebugStyle.Render(cell)
+	default:
+		return cell
+	}
+}
+
+var fieldColors = []lipgloss.Style{
+	lipgloss.NewStyle().Foreground(lipgloss.Color("75")),  // cyan
+	lipgloss.NewStyle().Foreground(lipgloss.Color("176")), // magenta
+	lipgloss.NewStyle().Foreground(lipgloss.Color("110")), // blue
+	lipgloss.NewStyle().Foreground(lipgloss.Color("150")), // olive
+	lipgloss.NewStyle().Foreground(lipgloss.Color("216")), // peach
+	lipgloss.NewStyle().Foreground(lipgloss.Color("114")), // teal
+}
+
+func colorField(colIdx int, cell string) string {
+	if strings.TrimSpace(cell) == "" {
+		return cell
+	}
+	return fieldColors[colIdx%len(fieldColors)].Render(cell)
 }
 
 func renderSearchBar(m *Model) string {
@@ -115,9 +179,9 @@ func renderSearchBar(m *Model) string {
 }
 
 var (
-	keyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	msgStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	keyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("110")).Bold(true)
+	descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	msgStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("71"))
 )
 
 func renderBottomPanel(m *Model) string {
@@ -197,15 +261,3 @@ func padOrTrunc(s string, w int) string {
 	return s + strings.Repeat(" ", w-len(runes))
 }
 
-func colorBySeverity(severity, line string) string {
-	switch severity {
-	case "WARN":
-		return warnStyle.Render(line)
-	case "ERROR", "FATAL":
-		return errorStyle.Render(line)
-	case "DEBUG", "TRACE":
-		return debugStyle.Render(line)
-	default:
-		return line
-	}
-}
