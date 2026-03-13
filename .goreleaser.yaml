@@ -1,0 +1,39 @@
+project_name: logpond
+
+builds:
+  - main: ./cmd/logpond
+    binary: logpond
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+brews:
+  - repository:
+      owner: lodibrahim
+      name: homebrew-tap
+    homepage: https://github.com/lodibrahim/logpond
+    description: "TUI log viewer with built-in MCP server for AI agents"
+    license: MIT
+    install: |
+      bin.install "logpond"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
