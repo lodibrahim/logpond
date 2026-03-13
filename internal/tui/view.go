@@ -14,7 +14,7 @@ var (
 	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	expandStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	cursorStyle  = lipgloss.NewStyle().Reverse(true)
