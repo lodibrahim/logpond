@@ -29,7 +29,11 @@ func main() {
 	}
 
 	// Check stdin is a pipe
-	stat, _ := os.Stdin.Stat()
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot stat stdin: %v\n", err)
+		os.Exit(1)
+	}
 	if (stat.Mode() & os.ModeCharDevice) != 0 {
 		fmt.Fprintln(os.Stderr, "usage: app | logpond --config ./config.yaml")
 		os.Exit(1)
@@ -84,6 +88,9 @@ func main() {
 			st.Append(entry)
 			program.Send(tui.NewEntryMsg{})
 		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "logpond: stdin read error: %v\n", err)
+		}
 		program.Send(tui.InputClosedMsg{})
 	}()
 
@@ -93,6 +100,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Shutdown
-	cancel()
 }
