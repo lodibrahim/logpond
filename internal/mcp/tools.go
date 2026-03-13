@@ -52,10 +52,18 @@ func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store) {
 				Limit:  params.Limit,
 			}
 			if params.After != "" {
-				q.After, _ = time.Parse(time.RFC3339, params.After)
+				t, err := time.Parse(time.RFC3339, params.After)
+				if err != nil {
+					return toolError(fmt.Sprintf("invalid 'after' timestamp: %v", err)), nil
+				}
+				q.After = t
 			}
 			if params.Before != "" {
-				q.Before, _ = time.Parse(time.RFC3339, params.Before)
+				t, err := time.Parse(time.RFC3339, params.Before)
+				if err != nil {
+					return toolError(fmt.Sprintf("invalid 'before' timestamp: %v", err)), nil
+				}
+				q.Before = t
 			}
 
 			results, err := search.Run(st, q)

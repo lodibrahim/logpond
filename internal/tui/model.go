@@ -204,6 +204,7 @@ func (m *Model) scrollToTop() {
 		maxOffset = 0
 	}
 	m.offset = maxOffset
+	m.cursor = 0
 	m.atBottom = false
 }
 

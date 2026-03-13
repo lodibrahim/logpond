@@ -81,15 +81,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: no columns defined")
 	}
 
-	hasFlex := false
+	flexCount := 0
 	for _, col := range c.Columns {
 		if col.Flex {
-			hasFlex = true
-			break
+			flexCount++
 		}
 	}
-	if !hasFlex {
-		return fmt.Errorf("config: exactly one column must have flex: true")
+	if flexCount != 1 {
+		return fmt.Errorf("config: exactly one column must have flex: true (found %d)", flexCount)
 	}
 
 	return nil

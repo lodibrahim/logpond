@@ -16,7 +16,8 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	expandStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	expandStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	cursorStyle  = lipgloss.NewStyle().Reverse(true)
 )
 
 func renderView(m *Model) string {
@@ -49,7 +50,13 @@ func renderView(m *Model) string {
 	}
 
 	for i := startIdx; i < endIdx; i++ {
-		b.WriteString(renderRow(m, entries[i]))
+		row := renderRow(m, entries[i])
+		// Highlight the cursor row (cursor 0 = bottom visible row)
+		rowFromBottom := endIdx - 1 - i
+		if rowFromBottom == m.cursor {
+			row = cursorStyle.Render(row)
+		}
+		b.WriteString(row)
 		b.WriteByte('\n')
 	}
 
