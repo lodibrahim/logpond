@@ -135,6 +135,16 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) refreshEntries() {
+	newCount := m.store.Len()
+
+	// When scrolled up, adjust offset so the view stays pinned to the same entries
+	if !m.atBottom && m.lastCount > 0 {
+		added := newCount - m.lastCount
+		if added > 0 {
+			m.offset += added
+		}
+	}
+
 	if m.filterQuery != nil {
 		results, _ := search.Run(m.store, *m.filterQuery)
 		m.filtered = results
@@ -144,7 +154,7 @@ func (m *Model) refreshEntries() {
 	if m.atBottom {
 		m.offset = 0
 	}
-	m.lastCount = m.store.Len()
+	m.lastCount = newCount
 }
 
 func (m *Model) visibleEntries() []*parser.Entry {
