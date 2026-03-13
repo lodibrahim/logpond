@@ -50,9 +50,17 @@ func main() {
 	p := parser.New(cfg)
 	st := store.New(*bufferSize)
 
+	// Open /dev/tty for keyboard input (stdin is the log pipe)
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot open /dev/tty: %v\n", err)
+		os.Exit(1)
+	}
+	defer tty.Close()
+
 	// Create TUI
 	model := tui.New(cfg, p, st)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithInput(tty))
 
 	// Context for shutdown coordination
 	ctx, cancel := context.WithCancel(context.Background())
