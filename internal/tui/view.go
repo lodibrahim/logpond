@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -16,8 +15,8 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	debugStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	expandStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	cursorStyle  = lipgloss.NewStyle().Reverse(true)
+	searchStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	searchActive = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 )
 
 func renderView(m *Model) string {
@@ -25,47 +24,48 @@ func renderView(m *Model) string {
 		return "loading..."
 	}
 
-	if m.expanded && m.expandIdx >= 0 {
-		return renderExpanded(m)
-	}
-
 	var b strings.Builder
 
 	b.WriteString(renderHeaderRow(m))
 	b.WriteByte('\n')
 
-	b.WriteString(strings.Repeat("─", m.width))
-	b.WriteByte('\n')
+	if m.filterMode || m.filterQuery != nil {
+		b.WriteString(renderSearchBar(m))
+		b.WriteByte('\n')
+	}
 
 	entries := m.visibleEntries()
 	tableH := m.tableHeight()
 
-	startIdx := len(entries) - m.offset - tableH
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	endIdx := len(entries) - m.offset
-	if endIdx > len(entries) {
-		endIdx = len(entries)
-	}
-
-	for i := startIdx; i < endIdx; i++ {
-		row := renderRow(m, entries[i])
-		// Highlight the cursor row (cursor 0 = bottom visible row)
-		rowFromBottom := endIdx - 1 - i
-		if rowFromBottom == m.cursor {
-			row = cursorStyle.Render(row)
+	if m.filterQuery != nil && len(entries) == 0 {
+		// Active filter with no matches
+		b.WriteString(warnStyle.Render("No matches"))
+		b.WriteByte('\n')
+		for i := 1; i < tableH; i++ {
+			b.WriteByte('\n')
 		}
-		b.WriteString(row)
-		b.WriteByte('\n')
+	} else {
+		startIdx := len(entries) - m.offset - tableH
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := len(entries) - m.offset
+		if endIdx > len(entries) {
+			endIdx = len(entries)
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			b.WriteString(renderRow(m, entries[i]))
+			b.WriteByte('\n')
+		}
+
+		rendered := endIdx - startIdx
+		for i := rendered; i < tableH; i++ {
+			b.WriteByte('\n')
+		}
 	}
 
-	rendered := endIdx - startIdx
-	for i := rendered; i < tableH; i++ {
-		b.WriteByte('\n')
-	}
-
-	b.WriteString(renderStatusBar(m))
+	b.WriteString(renderBottomPanel(m))
 
 	return b.String()
 }
@@ -104,61 +104,71 @@ func renderRow(m *Model, entry *parser.Entry) string {
 	return line
 }
 
-func renderExpanded(m *Model) string {
-	entries := m.visibleEntries()
-	if m.expandIdx >= len(entries) {
-		return ""
+func renderSearchBar(m *Model) string {
+	if m.filterMode {
+		return searchActive.Render(fmt.Sprintf("Search: %s█", m.filterInput))
 	}
-	entry := entries[m.expandIdx]
-
-	var b strings.Builder
-	b.WriteString(expandStyle.Render("── Log Entry Detail ──"))
-	b.WriteByte('\n')
-	b.WriteString(fmt.Sprintf("  Time:     %s\n", entry.Timestamp.Format("15:04:05.000")))
-	b.WriteString(fmt.Sprintf("  Level:    %s\n", entry.Severity))
-	b.WriteString(fmt.Sprintf("  Body:     %s\n", entry.Body))
-	b.WriteByte('\n')
-
-	keys := make([]string, 0, len(entry.Fields))
-	for k := range entry.Fields {
-		keys = append(keys, k)
+	if m.filterQuery != nil {
+		return searchActive.Render(fmt.Sprintf("Search: %s  (Esc to clear)", m.filterQuery.Text))
 	}
-	sort.Strings(keys)
-
-	b.WriteString(expandStyle.Render("  Fields:"))
-	b.WriteByte('\n')
-	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("    %s = %s\n", k, entry.Fields[k]))
-	}
-	b.WriteByte('\n')
-	b.WriteString(statusStyle.Render("  Press Enter to close"))
-	return b.String()
+	return searchStyle.Render("Search: press / to filter")
 }
 
-func renderStatusBar(m *Model) string {
-	var left string
-	if m.filterMode {
-		left = fmt.Sprintf("Filter: /%s█", m.filterInput)
-	} else if m.filterQuery != nil {
-		left = fmt.Sprintf("Filter: /%s", m.filterQuery.Text)
+var (
+	keyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	msgStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+)
+
+func renderBottomPanel(m *Model) string {
+	var b strings.Builder
+
+	// Line 1: separator
+	b.WriteString(statusStyle.Render(strings.Repeat("─", m.width)))
+	b.WriteByte('\n')
+
+	// Line 2: shortcuts or status message
+	if m.statusMsg != "" {
+		b.WriteString(msgStyle.Render(m.statusMsg))
+	} else {
+		shortcuts := []struct{ key, desc string }{
+			{"/", "search"},
+			{"Esc", "clear"},
+			{"y", "copy"},
+			{"c", "clear logs"},
+			{"k/j", "scroll"},
+			{"g/G", "top/tail"},
+			{"q", "quit"},
+		}
+		var parts []string
+		for _, s := range shortcuts {
+			parts = append(parts, keyStyle.Render(s.key)+" "+descStyle.Render(s.desc))
+		}
+		b.WriteString(strings.Join(parts, statusStyle.Render("  |  ")))
 	}
 
+	// Pad to width and add entry count on the right
 	total := m.store.Len()
 	right := fmt.Sprintf("%d entries", total)
 	if m.inputClosed {
-		right = fmt.Sprintf("%d entries (input closed)", total)
+		right = fmt.Sprintf("%d entries (closed)", total)
 	}
 	if m.filtered != nil {
-		right = fmt.Sprintf("%d/%d entries", len(m.filtered), total)
+		right = fmt.Sprintf("%d/%d", len(m.filtered), total)
 	}
+	right = statusStyle.Render(right)
 
-	leftW := len([]rune(left))
-	rightW := len([]rune(right))
-	gap := m.width - leftW - rightW
+	// Calculate gap for right-alignment on line 2
+	lineW := lipgloss.Width(b.String()) - lipgloss.Width(statusStyle.Render(strings.Repeat("─", m.width))) - 1
+	rightW := lipgloss.Width(right)
+	gap := m.width - lineW - rightW
 	if gap < 1 {
 		gap = 1
 	}
-	return statusStyle.Render(left + strings.Repeat(" ", gap) + right)
+	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(right)
+
+	return b.String()
 }
 
 func flexWidth(m *Model) int {

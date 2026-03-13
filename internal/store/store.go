@@ -31,6 +31,13 @@ func (s *Store) Append(entry *parser.Entry) {
 	s.mu.Unlock()
 }
 
+func (s *Store) Clear() {
+	s.mu.Lock()
+	s.head = 0
+	s.count = 0
+	s.mu.Unlock()
+}
+
 func (s *Store) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

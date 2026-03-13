@@ -22,7 +22,7 @@ func Run(s *store.Store, q Query) ([]*parser.Entry, error) {
 	var re *regexp.Regexp
 	if q.Text != "" {
 		var err error
-		re, err = regexp.Compile(q.Text)
+		re, err = regexp.Compile("(?i)" + q.Text)
 		if err != nil {
 			return nil, fmt.Errorf("invalid regex: %w", err)
 		}
@@ -65,9 +65,15 @@ func matches(entry *parser.Entry, q Query, re *regexp.Regexp) bool {
 	}
 
 	if re != nil {
-		if !re.MatchString(entry.Body) && !re.MatchString(entry.Raw) {
-			return false
+		if re.MatchString(entry.Body) || re.MatchString(entry.Raw) {
+			return true
 		}
+		for _, v := range entry.Fields {
+			if re.MatchString(v) {
+				return true
+			}
+		}
+		return false
 	}
 
 	return true

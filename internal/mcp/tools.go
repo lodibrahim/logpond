@@ -14,7 +14,7 @@ import (
 	"github.com/lodibrahim/logpond/internal/store"
 )
 
-func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store) {
+func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store, name string) {
 	// search_logs
 	srv.AddTool(
 		&mcp.Tool{
@@ -70,8 +70,11 @@ func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store) {
 			if err != nil {
 				return toolError(err.Error()), nil
 			}
+			if len(results) == 0 {
+				return toolText(fmt.Sprintf("[%s] No matches found.", name)), nil
+			}
 
-			return toToolResult(results)
+			return toToolResult(name, results)
 		},
 	)
 
@@ -99,7 +102,7 @@ func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store) {
 			}
 
 			entries := st.Tail(params.N)
-			return toToolResult(entries)
+			return toToolResult(name, entries)
 		},
 	)
 
@@ -115,7 +118,14 @@ func registerTools(srv *mcp.Server, cfg *config.Config, st *store.Store) {
 		},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			schema := buildSchema(cfg, st)
-			b, _ := json.MarshalIndent(schema, "", "  ")
+			result := struct {
+				Instance string         `json:"instance"`
+				Columns  []columnSchema `json:"columns"`
+			}{
+				Instance: name,
+				Columns:  schema,
+			}
+			b, _ := json.MarshalIndent(result, "", "  ")
 			return toolText(string(b)), nil
 		},
 	)
@@ -180,7 +190,7 @@ func toolError(msg string) *mcp.CallToolResult {
 	}
 }
 
-func toToolResult(entries []*parser.Entry) (*mcp.CallToolResult, error) {
+func toToolResult(instance string, entries []*parser.Entry) (*mcp.CallToolResult, error) {
 	type entryJSON struct {
 		Timestamp string            `json:"timestamp"`
 		Severity  string            `json:"severity"`
@@ -188,9 +198,17 @@ func toToolResult(entries []*parser.Entry) (*mcp.CallToolResult, error) {
 		Fields    map[string]string `json:"fields"`
 	}
 
-	result := make([]entryJSON, len(entries))
+	result := struct {
+		Instance string      `json:"instance"`
+		Count    int         `json:"count"`
+		Entries  []entryJSON `json:"entries"`
+	}{
+		Instance: instance,
+		Count:    len(entries),
+		Entries:  make([]entryJSON, len(entries)),
+	}
 	for i, e := range entries {
-		result[i] = entryJSON{
+		result.Entries[i] = entryJSON{
 			Timestamp: e.Timestamp.Format(time.RFC3339),
 			Severity:  e.Severity,
 			Body:      e.Body,
