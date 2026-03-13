@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -107,13 +108,12 @@ func main() {
 	// Start stdin reader
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
-		// Increase buffer for long JSON lines
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			entry, err := p.Parse(line)
 			if err != nil {
-				continue // skip non-JSON lines
+				continue
 			}
 			st.Append(entry)
 			program.Send(tui.NewEntryMsg{})
@@ -142,7 +142,24 @@ func main() {
 func runHub() {
 	fs := flag.NewFlagSet("hub", flag.ExitOnError)
 	port := fs.Int("port", 9800, "Hub MCP server port")
+	install := fs.Bool("install", false, "Install hub as launchd service (starts on login)")
+	uninstall := fs.Bool("uninstall", false, "Uninstall hub launchd service")
 	fs.Parse(os.Args[2:])
+
+	if *install {
+		if err := installLaunchd(*port); err != nil {
+			fmt.Fprintf(os.Stderr, "logpond hub: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *uninstall {
+		if err := uninstallLaunchd(); err != nil {
+			fmt.Fprintf(os.Stderr, "logpond hub: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,4 +176,72 @@ func runHub() {
 		fmt.Fprintf(os.Stderr, "logpond hub: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+const launchdLabel = "com.logpond.hub"
+
+func launchdPlistPath() string {
+	home, _ := os.UserHomeDir()
+	return home + "/Library/LaunchAgents/" + launchdLabel + ".plist"
+}
+
+func installLaunchd(port int) error {
+	binPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find logpond binary: %w", err)
+	}
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>hub</string>
+        <string>--port</string>
+        <string>%d</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/tmp/logpond-hub.log</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/logpond-hub.log</string>
+</dict>
+</plist>`, launchdLabel, binPath, port)
+
+	path := launchdPlistPath()
+	if err := os.WriteFile(path, []byte(plist), 0644); err != nil {
+		return fmt.Errorf("write plist: %w", err)
+	}
+
+	cmd := exec.Command("launchctl", "load", path)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl load: %s (%w)", string(out), err)
+	}
+
+	fmt.Fprintf(os.Stderr, "logpond hub: installed and started (port %d)\n", port)
+	fmt.Fprintf(os.Stderr, "  plist: %s\n", path)
+	fmt.Fprintf(os.Stderr, "  logs:  /tmp/logpond-hub.log\n")
+	fmt.Fprintf(os.Stderr, "  MCP:   http://localhost:%d/mcp\n", port)
+	return nil
+}
+
+func uninstallLaunchd() error {
+	path := launchdPlistPath()
+
+	cmd := exec.Command("launchctl", "unload", path)
+	cmd.Run() //nolint:errcheck
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove plist: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "logpond hub: uninstalled")
+	return nil
 }
