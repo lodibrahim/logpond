@@ -30,8 +30,7 @@ type MappingConfig struct {
 }
 
 type FieldRef struct {
-	Field      string `yaml:"field"`
-	TimeFormat string `yaml:"time_format,omitempty"`
+	Field string `yaml:"field"`
 }
 
 type ColumnConfig struct {

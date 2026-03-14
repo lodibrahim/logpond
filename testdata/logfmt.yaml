@@ -4,7 +4,6 @@ type: logfmt
 mapping:
   timestamp:
     field: ts
-    time_format: rfc3339
   severity:
     field: level
   body:

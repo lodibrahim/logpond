@@ -49,7 +49,6 @@ type: json
 mapping:
   timestamp:
     field: ts
-    time_format: rfc3339
   severity:
     field: level
   body:
@@ -193,7 +192,6 @@ type: json
 mapping:
   timestamp:
     field: timestamp                   # JSON path to timestamp
-    time_format: rfc3339
   severity:
     field: level                       # JSON path to log level
   body:
