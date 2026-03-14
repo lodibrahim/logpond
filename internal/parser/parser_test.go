@@ -84,6 +84,31 @@ func TestParseSpanFields(t *testing.T) {
 	}
 }
 
+func TestAutoMapSpanFields(t *testing.T) {
+	// When auto_map_remaining is true, span fields should be extracted
+	// even without explicit span_field column definitions.
+	p := New(algoBotConfig())
+	line := `{"timestamp":"2026-02-19T14:14:12Z","level":"INFO","fields":{"message":"Ring buffer created","capacity":4194304},"spans":[{"name":"","component":"engine","symbol":"TQQQ","sid":3,"date":"2026-02-19"}]}`
+	entry, err := p.Parse(line)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	// sid and date should be auto-extracted from spans (no column needed)
+	if entry.Fields["sid"] != "3" {
+		t.Errorf("sid = %q, want %q", entry.Fields["sid"], "3")
+	}
+	if entry.Fields["date"] != "2026-02-19" {
+		t.Errorf("date = %q, want %q", entry.Fields["date"], "2026-02-19")
+	}
+	// component and symbol should still work (have column definitions)
+	if entry.Fields["component"] != "engine" {
+		t.Errorf("component = %q, want %q", entry.Fields["component"], "engine")
+	}
+	if entry.Fields["symbol"] != "TQQQ" {
+		t.Errorf("symbol = %q, want %q", entry.Fields["symbol"], "TQQQ")
+	}
+}
+
 func TestParseAutoMapRemaining(t *testing.T) {
 	p := New(algoBotConfig())
 	line := `{"timestamp":"2026-02-19T14:14:12Z","level":"INFO","fields":{"message":"test","client_ref":"NVDA_0","price":186.45},"target":"execution::paper"}`
