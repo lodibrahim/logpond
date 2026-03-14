@@ -209,7 +209,7 @@ func buildSchema(cfg *config.Config, st *store.Store) []columnSchema {
 func fieldValueForColumn(entry *parser.Entry, col config.ColumnConfig) string {
 	switch col.SourceType() {
 	case "timestamp":
-		return entry.Timestamp.Format("15:04:05")
+		return entry.RawTimestamp
 	case "severity":
 		return entry.Severity
 	case "field", "span_field":
@@ -261,7 +261,7 @@ func toToolResult(instance string, entries []*parser.Entry, exclude map[string]b
 			fields = filterFields(e.Fields, exclude)
 		}
 		result.Entries[i] = entryJSON{
-			Timestamp: e.Timestamp.Format(time.RFC3339),
+			Timestamp: e.RawTimestamp,
 			Severity:  e.Severity,
 			Body:      e.Body,
 			Fields:    fields,

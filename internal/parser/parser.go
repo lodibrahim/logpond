@@ -12,11 +12,12 @@ import (
 )
 
 type Entry struct {
-	Timestamp time.Time
-	Severity  string
-	Body      string
-	Fields    map[string]string
-	Raw       string
+	Timestamp    time.Time
+	RawTimestamp string
+	Severity     string
+	Body         string
+	Fields       map[string]string
+	Raw          string
 }
 
 type Parser struct {
@@ -48,6 +49,7 @@ func (p *Parser) parseJSON(line string) (*Entry, error) {
 	consumed := make(map[string]bool)
 
 	if ts := getNestedString(raw, p.cfg.Mapping.Timestamp.Field); ts != "" {
+		entry.RawTimestamp = ts
 		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
 		markConsumed(consumed, p.cfg.Mapping.Timestamp.Field)
 	}
@@ -99,6 +101,7 @@ func (p *Parser) parseLogfmt(line string) (*Entry, error) {
 
 	tsField := p.cfg.Mapping.Timestamp.Field
 	if v, ok := pairs[tsField]; ok {
+		entry.RawTimestamp = v
 		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, v)
 		consumed[tsField] = true
 	}
@@ -200,7 +203,7 @@ func (p *Parser) ResolveColumns(entry *Entry) []string {
 			if col.Format == "time_short" {
 				cells[i] = entry.Timestamp.Format("15:04:05")
 			} else {
-				cells[i] = entry.Timestamp.Format(time.RFC3339)
+				cells[i] = entry.RawTimestamp
 			}
 		case "severity":
 			cells[i] = entry.Severity

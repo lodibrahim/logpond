@@ -11,7 +11,7 @@ import (
 func simpleConfig() *config.Config {
 	return &config.Config{
 		Mapping: config.MappingConfig{
-			Timestamp: config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Timestamp: config.FieldRef{Field: "ts"},
 			Severity:  config.FieldRef{Field: "level"},
 			Body:      config.FieldRef{Field: "msg"},
 		},
@@ -26,7 +26,7 @@ func simpleConfig() *config.Config {
 func algoBotConfig() *config.Config {
 	return &config.Config{
 		Mapping: config.MappingConfig{
-			Timestamp:        config.FieldRef{Field: "timestamp", TimeFormat: "rfc3339"},
+			Timestamp:        config.FieldRef{Field: "timestamp"},
 			Severity:         config.FieldRef{Field: "level"},
 			Body:             config.FieldRef{Field: "fields.message"},
 			AutoMapRemaining: true,
@@ -110,7 +110,7 @@ func TestParseInvalidJSON(t *testing.T) {
 func TestParseBoolAndNestedFields(t *testing.T) {
 	cfg := &config.Config{
 		Mapping: config.MappingConfig{
-			Timestamp:        config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Timestamp:        config.FieldRef{Field: "ts"},
 			Severity:         config.FieldRef{Field: "level"},
 			Body:             config.FieldRef{Field: "msg"},
 			AutoMapRemaining: true,
@@ -187,6 +187,37 @@ func TestTimestampParsing(t *testing.T) {
 	if !entry.Timestamp.Equal(expected) {
 		t.Errorf("Timestamp = %v, want %v", entry.Timestamp, expected)
 	}
+	if entry.RawTimestamp != "2026-02-19T14:14:12.345Z" {
+		t.Errorf("RawTimestamp = %q, want %q", entry.RawTimestamp, "2026-02-19T14:14:12.345Z")
+	}
+}
+
+func TestRawTimestampPassthrough(t *testing.T) {
+	// No format specified — ResolveColumns should return the raw timestamp string
+	cfg := &config.Config{
+		Mapping: config.MappingConfig{
+			Timestamp: config.FieldRef{Field: "ts"},
+			Severity:  config.FieldRef{Field: "level"},
+			Body:      config.FieldRef{Field: "msg"},
+		},
+		Columns: []config.ColumnConfig{
+			{Name: "Time", Source: "timestamp", Flex: true},
+		},
+	}
+	p := New(cfg)
+	entry, _ := p.Parse(`{"ts":"2026-02-19T14:14:12.345678Z","level":"INFO","msg":"test"}`)
+	cells := p.ResolveColumns(entry)
+	if cells[0] != "2026-02-19T14:14:12.345678Z" {
+		t.Errorf("Time cell = %q, want raw timestamp %q", cells[0], "2026-02-19T14:14:12.345678Z")
+	}
+}
+
+func TestRawTimestampLogfmt(t *testing.T) {
+	p := New(logfmtConfig())
+	entry, _ := p.Parse(`ts=2026-02-19T14:14:12.999Z level=INFO msg="test"`)
+	if entry.RawTimestamp != "2026-02-19T14:14:12.999Z" {
+		t.Errorf("RawTimestamp = %q, want %q", entry.RawTimestamp, "2026-02-19T14:14:12.999Z")
+	}
 }
 
 // --- logfmt tests ---
@@ -195,7 +226,7 @@ func logfmtConfig() *config.Config {
 	return &config.Config{
 		Type: "logfmt",
 		Mapping: config.MappingConfig{
-			Timestamp: config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Timestamp: config.FieldRef{Field: "ts"},
 			Severity:  config.FieldRef{Field: "level"},
 			Body:      config.FieldRef{Field: "msg"},
 		},
@@ -211,7 +242,7 @@ func logfmtConfigWithFields() *config.Config {
 	return &config.Config{
 		Type: "logfmt",
 		Mapping: config.MappingConfig{
-			Timestamp:        config.FieldRef{Field: "ts", TimeFormat: "rfc3339"},
+			Timestamp:        config.FieldRef{Field: "ts"},
 			Severity:         config.FieldRef{Field: "level"},
 			Body:             config.FieldRef{Field: "msg"},
 			AutoMapRemaining: true,
