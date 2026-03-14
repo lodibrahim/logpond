@@ -20,7 +20,7 @@ archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
 
-homebrew_casks:
+brews:
   - repository:
       owner: lodibrahim
       name: homebrew-tap
@@ -28,8 +28,8 @@ homebrew_casks:
     homepage: https://github.com/lodibrahim/logpond
     description: "TUI log viewer with built-in MCP server for AI agents"
     license: MIT
-    binaries:
-      - logpond
+    install: |
+      bin.install "logpond"
 
 checksum:
   name_template: checksums.txt
