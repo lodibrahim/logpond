@@ -28,8 +28,8 @@ homebrew_casks:
     homepage: https://github.com/lodibrahim/logpond
     description: "TUI log viewer with built-in MCP server for AI agents"
     license: MIT
-    install: |
-      bin.install "logpond"
+    binaries:
+      - logpond
 
 checksum:
   name_template: checksums.txt
