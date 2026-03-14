@@ -257,14 +257,19 @@ func (p *Parser) extractSpanFields(spans interface{}, entry *Entry) {
 			needed[col.SourceField()] = true
 		}
 	}
+	autoMap := p.cfg.Mapping.AutoMapRemaining
 
+	// Iterate in reverse — last span (innermost) wins on conflicts.
 	for i := len(spanSlice) - 1; i >= 0; i-- {
 		spanMap, ok := spanSlice[i].(map[string]interface{})
 		if !ok {
 			continue
 		}
 		for key, val := range spanMap {
-			if needed[key] {
+			if key == "name" {
+				continue // skip tracing span name — internal metadata, not user data
+			}
+			if needed[key] || autoMap {
 				if _, already := entry.Fields[key]; !already {
 					entry.Fields[key] = stringify(val)
 				}
