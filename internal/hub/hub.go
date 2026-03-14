@@ -212,32 +212,6 @@ func (h *Hub) Run(ctx context.Context) error {
 	}
 	fmt.Fprintf(os.Stderr, "logpond hub: MCP server on http://localhost:%d/mcp\n", h.port)
 
-	// Idle shutdown: if no instances are alive for 60s, shut down
-	go func() {
-		emptyChecks := 0
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if len(h.liveInstances()) == 0 {
-					emptyChecks++
-					if emptyChecks >= 2 {
-						fmt.Fprintln(os.Stderr, "logpond hub: no instances for 60s, shutting down")
-						shutCtx, shutCancel := context.WithTimeout(context.Background(), 1*time.Second)
-						httpServer.Shutdown(shutCtx) //nolint:errcheck
-						shutCancel()
-						return
-					}
-				} else {
-					emptyChecks = 0
-				}
-			}
-		}
-	}()
-
 	go func() {
 		<-ctx.Done()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 1*time.Second)

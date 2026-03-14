@@ -119,7 +119,9 @@ The hub is an MCP aggregator that sits in front of all logpond instances.
 2. If not, spawns `logpond hub` as a detached background process
 3. Each instance registers itself in `~/.logpond/<name>-<pid>.json`
 4. Hub discovers instances on every query (no polling)
-5. Hub shuts down after 60s with no live instances
+5. Hub persists across instance restarts — start/stop services freely
+
+> **Note:** The hub must be running before the MCP client (e.g. Claude Code) connects. If you start the client first, run any logpond instance to auto-spawn the hub, then restart the client.
 
 ### Hub tools
 
