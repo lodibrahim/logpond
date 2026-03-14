@@ -1,3 +1,5 @@
+version: 2
+
 project_name: logpond
 
 builds:
@@ -15,10 +17,10 @@ builds:
       - -s -w
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
 
-brews:
+homebrew_casks:
   - repository:
       owner: lodibrahim
       name: homebrew-tap
