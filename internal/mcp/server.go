@@ -15,7 +15,6 @@ import (
 
 type Server struct {
 	httpServer *http.Server
-	port       int
 }
 
 func New(cfg *config.Config, st *store.Store, port int, name string) *Server {
@@ -42,14 +41,17 @@ func New(cfg *config.Config, st *store.Store, port int, name string) *Server {
 			Addr:    fmt.Sprintf(":%d", port),
 			Handler: mux,
 		},
-		port: port,
 	}
 }
 
+// Listen binds the MCP server's TCP port. Port 0 (the default) binds ":0", so
+// the OS assigns a free port and co-located instances never collide; the hub
+// discovers the actual port from the registry file. An explicit --mcp-port binds
+// exactly that port and fails fast on conflict.
 func (s *Server) Listen() (net.Listener, error) {
 	ln, err := net.Listen("tcp", s.httpServer.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("MCP server failed to bind to port %d: %w", s.port, err)
+		return nil, fmt.Errorf("MCP server failed to bind to %s: %w", s.httpServer.Addr, err)
 	}
 	return ln, nil
 }

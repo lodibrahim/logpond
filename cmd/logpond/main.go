@@ -33,7 +33,7 @@ func main() {
 
 	configPath := flag.String("config", "", "Path to YAML config file (required)")
 	bufferSize := flag.Int("buffer", 50000, "Ring buffer capacity")
-	mcpPort := flag.Int("mcp-port", 9876, "MCP server port")
+	mcpPort := flag.Int("mcp-port", 0, "MCP server port (0 = auto-select a free port)")
 	name := flag.String("name", "", "Instance name — overrides config name (shown in MCP responses)")
 	flag.Parse()
 
@@ -85,17 +85,18 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Bind MCP server port synchronously (fail fast on port conflict)
+	// Bind synchronously so we advertise + register the actual bound port (see Server.Listen).
 	mcp := mcpsvr.New(cfg, st, *mcpPort, instanceName)
 	ln, err := mcp.Listen()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logpond: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "logpond [%s]: MCP server on http://localhost:%d/mcp\n", instanceName, *mcpPort)
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+	fmt.Fprintf(os.Stderr, "logpond [%s]: MCP server on http://localhost:%d/mcp\n", instanceName, actualPort)
 
-	// Register instance for hub discovery
-	if err := registration.Register(instanceName, *mcpPort); err != nil {
+	// Register instance for hub discovery — the actual bound port, so the hub connects right.
+	if err := registration.Register(instanceName, actualPort); err != nil {
 		fmt.Fprintf(os.Stderr, "logpond: warning: failed to register instance: %v\n", err)
 	}
 	defer registration.Deregister(instanceName)
