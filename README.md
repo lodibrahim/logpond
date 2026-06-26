@@ -146,7 +146,7 @@ logpond hub --port 9900  # custom port
 
 ## Instance MCP Tools
 
-Each logpond instance also exposes its own MCP endpoint (default port 9876):
+Each logpond instance also exposes its own MCP endpoint on an auto-selected free port (the hub discovers each via its registration file, so you query the hub, not the port):
 
 ### `stats`
 
@@ -253,7 +253,7 @@ app 2>&1 | logpond --config ./config.yaml [flags]
 Flags:
   --config     Path to YAML config file (required)
   --buffer     Ring buffer capacity (default: 50000)
-  --mcp-port   MCP server port (default: 9876)
+  --mcp-port   MCP server port (default: 0 = auto-select a free port)
   --name       Instance name override (default: from config)
 
 # Hub mode (aggregator)
@@ -277,7 +277,7 @@ Flags:
                ┌──────────────┘          └──────────────┐
                ▼                                        ▼
   ┌─────────────────────────┐          ┌─────────────────────────┐
-  │  Instance A (:9876)     │          │  Instance B (:9877)     │
+  │  Instance A (auto-port) │          │  Instance B (auto-port) │
   │                         │          │                         │
   │  stdin ─▶ Parser        │          │  stdin ─▶ Parser        │
   │            ▼            │          │            ▼            │
@@ -302,8 +302,10 @@ Just pipe each service through its own logpond instance:
 api-server 2>&1 | logpond --config ./api.yaml
 
 # Terminal 2
-worker 2>&1 | logpond --config ./worker.yaml --mcp-port 9877
+worker 2>&1 | logpond --config ./worker.yaml
 ```
+
+No port juggling: the second instance auto-selects a free port and registers it for the hub. Pass `--mcp-port N` only if you want a fixed, known port (it then binds exactly that or fails).
 
 Each instance gets its own TUI, its own config, and its own columns. The hub merges them all — the AI agent sees everything from one endpoint.
 
