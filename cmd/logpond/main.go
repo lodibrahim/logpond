@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -112,6 +114,7 @@ func main() {
 	}()
 
 	// Start stdin reader
+	var inputClosed, signalExit atomic.Bool
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -119,7 +122,13 @@ func main() {
 			line := scanner.Text()
 			entry, err := p.Parse(line)
 			if err != nil {
-				continue
+				// Keep unparseable lines raw (whole line as body) unless the
+				// config opts out — dropping them hides crashes and stray
+				// writer output. Blank lines stay noise either way.
+				if cfg.DropUnparsed || strings.TrimSpace(line) == "" {
+					continue
+				}
+				entry = parser.RawEntry(line)
 			}
 			st.Append(entry)
 			program.Send(tui.NewEntryMsg{})
@@ -127,6 +136,7 @@ func main() {
 		if err := scanner.Err(); err != nil {
 			fmt.Fprintf(os.Stderr, "logpond: stdin read error: %v\n", err)
 		}
+		inputClosed.Store(true)
 		program.Send(tui.InputClosedMsg{})
 	}()
 
@@ -135,13 +145,27 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 		<-sig
+		signalExit.Store(true)
 		cancel()
 		program.Kill()
 	}()
 
 	// Run TUI (blocks until quit)
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	_, runErr := program.Run()
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", runErr)
+	}
+
+	// Quitting the TUI ends the whole pipeline. Without this, the writer
+	// (`app | logpond`) keeps running with no reader and only dies on its
+	// next stdout write — an idle server can hold its port indefinitely.
+	// SIGTERM to our own process group mirrors Ctrl-C semantics. Skipped
+	// when the pipe already drained (writer finished on its own), when exit
+	// came from a signal (the group was already signaled), or when the TUI
+	// failed to start at all (headless invocation — killing the group there
+	// would take down the calling script, not just the pipeline).
+	if runErr == nil && !inputClosed.Load() && !signalExit.Load() {
+		_ = syscall.Kill(0, syscall.SIGTERM)
 	}
 }
 

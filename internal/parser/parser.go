@@ -28,6 +28,18 @@ func New(cfg *config.Config) *Parser {
 	return &Parser{cfg: cfg}
 }
 
+// RawEntry wraps a line the parser could not handle so callers can keep it
+// (whole line as the body) instead of silently dropping it. Timestamped at
+// arrival so it interleaves correctly in merged views.
+func RawEntry(line string) *Entry {
+	return &Entry{
+		Timestamp: time.Now(),
+		Body:      line,
+		Fields:    map[string]string{},
+		Raw:       line,
+	}
+}
+
 func (p *Parser) Parse(line string) (*Entry, error) {
 	if p.cfg.Type == "logfmt" {
 		return p.parseLogfmt(line)

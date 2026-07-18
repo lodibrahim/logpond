@@ -53,3 +53,23 @@ func TestFlexColumnRequired(t *testing.T) {
 		t.Error("Validate should fail when no flex column exists")
 	}
 }
+
+func TestDropUnparsedDefaultsFalse(t *testing.T) {
+	cfg, err := Load("../../testdata/simple.yaml")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.DropUnparsed {
+		t.Error("DropUnparsed should default to false (keep raw lines)")
+	}
+}
+
+func TestDropUnparsedOptIn(t *testing.T) {
+	cfg, err := Load("../../testdata/drop_unparsed.yaml")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !cfg.DropUnparsed {
+		t.Error("DropUnparsed should be true when set in yaml")
+	}
+}

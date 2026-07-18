@@ -87,7 +87,7 @@ The first instance auto-spawns the **hub** on port 9800. No extra setup.
 | `Esc` | Clear search |
 | `y` | Copy visible entries to clipboard |
 | `c` | Clear all logs |
-| `q` | Quit |
+| `q` | Quit — also terminates the pipeline feeding logpond (same as Ctrl-C), so `app \| logpond` leaves no orphaned writer behind |
 
 Mouse wheel scrolling is also supported.
 
@@ -190,6 +190,10 @@ Returns column definitions, sample values, and the `context` string from your co
 ```yaml
 name: my-app                          # Instance name (shown in MCP responses)
 type: json
+drop_unparsed: false                  # Default: unparseable lines are KEPT raw
+                                      # (whole line as body, arrival timestamp) —
+                                      # crashes and stray writer output stay
+                                      # visible. Set true to discard them.
 
 mapping:
   timestamp:
