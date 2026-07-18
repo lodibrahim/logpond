@@ -444,3 +444,13 @@ func TestRawEntry(t *testing.T) {
 		t.Error("Fields should be non-nil")
 	}
 }
+
+func TestRawEntryStripsAnsi(t *testing.T) {
+	entry := RawEntry("\x1b[32m➜\x1b[39m  Local: http://localhost:3000/")
+	if strings.Contains(entry.Body, "\x1b") {
+		t.Errorf("Body still contains ANSI escapes: %q", entry.Body)
+	}
+	if entry.Body != "➜  Local: http://localhost:3000/" {
+		t.Errorf("Body = %q", entry.Body)
+	}
+}

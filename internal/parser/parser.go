@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,13 +29,20 @@ func New(cfg *config.Config) *Parser {
 	return &Parser{cfg: cfg}
 }
 
+// ansiPattern matches SGR color/style escape sequences — raw writer output
+// (e.g. a dev server's pretty terminal lines) is full of them, and a log
+// viewer should show the text, not the escapes.
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
 // RawEntry wraps a line the parser could not handle so callers can keep it
 // (whole line as the body) instead of silently dropping it. Timestamped at
-// arrival so it interleaves correctly in merged views.
+// arrival so it interleaves correctly in merged views; ANSI styling is
+// stripped.
 func RawEntry(line string) *Entry {
+	clean := ansiPattern.ReplaceAllString(line, "")
 	return &Entry{
 		Timestamp: time.Now(),
-		Body:      line,
+		Body:      clean,
 		Fields:    map[string]string{},
 		Raw:       line,
 	}
