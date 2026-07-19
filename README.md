@@ -87,7 +87,7 @@ The first instance auto-spawns the **hub** on port 9800. No extra setup.
 | `Esc` | Clear search |
 | `y` | Copy visible entries to clipboard |
 | `c` | Clear all logs |
-| `q` | Quit — also terminates the pipeline feeding logpond (same as Ctrl-C), so `app \| logpond` leaves no orphaned writer behind |
+| `q` | Quit — also interrupts the pipeline feeding logpond (SIGINT to the process group, same as Ctrl-C), so `app \| logpond` leaves no orphaned writer behind. Note: inside a wrapper script or make (no job control) the process group includes the wrapper, so quitting ends it too |
 
 Mouse wheel scrolling is also supported.
 
@@ -194,6 +194,9 @@ drop_unparsed: false                  # Default: unparseable lines are KEPT raw
                                       # (whole line as body, arrival timestamp) —
                                       # crashes and stray writer output stay
                                       # visible. Set true to discard them.
+                                      # Raw entries carry no severity, so
+                                      # level-filtered MCP search won't match
+                                      # them — find them via text search/tail.
 
 mapping:
   timestamp:

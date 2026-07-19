@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -114,7 +115,7 @@ func main() {
 	}()
 
 	// Start stdin reader
-	var inputClosed, signalExit atomic.Bool
+	var inputClosed atomic.Bool
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -124,28 +125,40 @@ func main() {
 			if err != nil {
 				// Keep unparseable lines raw (whole line as body) unless the
 				// config opts out — dropping them hides crashes and stray
-				// writer output. Blank lines stay noise either way.
-				if cfg.DropUnparsed || strings.TrimSpace(line) == "" {
+				// writer output. Blank lines stay noise either way; the
+				// blank check runs on the ANSI-stripped body so control-only
+				// lines (spinner redraws) don't become empty entries.
+				if cfg.DropUnparsed {
 					continue
 				}
 				entry = parser.RawEntry(line)
+				if strings.TrimSpace(entry.Body) == "" {
+					continue
+				}
 			}
 			st.Append(entry)
 			program.Send(tui.NewEntryMsg{})
 		}
 		if err := scanner.Err(); err != nil {
+			// A read error (e.g. a line over the 1MB buffer) is not EOF —
+			// the writer is still running, so the quit-time group kill must
+			// stay armed. Only a clean EOF means the writer finished.
 			fmt.Fprintf(os.Stderr, "logpond: stdin read error: %v\n", err)
+		} else {
+			inputClosed.Store(true)
 		}
-		inputClosed.Store(true)
 		program.Send(tui.InputClosedMsg{})
 	}()
 
 	// Handle SIGINT/SIGTERM for clean exit
+	var recvSig atomic.Int32
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-		<-sig
-		signalExit.Store(true)
+		s := <-sig
+		if ss, ok := s.(syscall.Signal); ok {
+			recvSig.Store(int32(ss))
+		}
 		cancel()
 		program.Kill()
 	}()
@@ -159,13 +172,25 @@ func main() {
 	// Quitting the TUI ends the whole pipeline. Without this, the writer
 	// (`app | logpond`) keeps running with no reader and only dies on its
 	// next stdout write — an idle server can hold its port indefinitely.
-	// SIGTERM to our own process group mirrors Ctrl-C semantics. Skipped
-	// when the pipe already drained (writer finished on its own), when exit
-	// came from a signal (the group was already signaled), or when the TUI
-	// failed to start at all (headless invocation — killing the group there
-	// would take down the calling script, not just the pipeline).
-	if runErr == nil && !inputClosed.Load() && !signalExit.Load() {
-		_ = syscall.Kill(0, syscall.SIGTERM)
+	// Skipped when the pipe already drained (writer finished on its own).
+	// Two live paths, both signaling our own process group:
+	//   - clean TUI quit (q): SIGINT, mirroring Ctrl-C semantics so writers
+	//     with graceful-interrupt handlers flush before exiting;
+	//   - external signal aimed at logpond alone (program.Kill() makes Run
+	//     return ErrProgramKilled): forward the same signal, so a supervisor
+	//     killing logpond also tears down the writer. If the whole group was
+	//     already signaled (terminal Ctrl-C), the duplicate is harmless.
+	// Any other Run error means the TUI failed to start (headless invocation)
+	// — killing the group there would take down the calling script.
+	if !inputClosed.Load() {
+		switch {
+		case runErr == nil:
+			_ = syscall.Kill(0, syscall.SIGINT)
+		case errors.Is(runErr, tea.ErrProgramKilled):
+			if sig := syscall.Signal(recvSig.Load()); sig != 0 {
+				_ = syscall.Kill(0, sig)
+			}
+		}
 	}
 }
 
