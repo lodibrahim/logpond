@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lodibrahim/logpond/internal/config"
 )
 
@@ -26,6 +27,22 @@ type Parser struct {
 
 func New(cfg *config.Config) *Parser {
 	return &Parser{cfg: cfg}
+}
+
+// RawEntry wraps a line the parser could not handle so callers can keep it
+// (whole line as the body) instead of silently dropping it. Timestamped at
+// arrival so it interleaves correctly in merged views; ANSI styling is
+// stripped. RawTimestamp carries the formatted arrival time so timestamp
+// columns render for raw entries under any format, not just time_short.
+func RawEntry(line string) *Entry {
+	now := time.Now()
+	return &Entry{
+		Timestamp:    now,
+		RawTimestamp: now.Format(time.RFC3339),
+		Body:         ansi.Strip(line),
+		Fields:       make(map[string]string),
+		Raw:          line,
+	}
 }
 
 func (p *Parser) Parse(line string) (*Entry, error) {

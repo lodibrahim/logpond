@@ -14,6 +14,10 @@ type Config struct {
 	Mapping MappingConfig  `yaml:"mapping"`
 	Columns []ColumnConfig `yaml:"columns"`
 	MCP     MCPConfig      `yaml:"mcp"`
+	// DropUnparsed restores the pre-v(next) behavior of discarding lines the
+	// parser rejects. By default unparseable lines are kept raw (whole line
+	// as body) — silent drops hide crashes and stray writer output.
+	DropUnparsed bool `yaml:"drop_unparsed"`
 }
 
 type MCPConfig struct {

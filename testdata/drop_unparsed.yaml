@@ -1,0 +1,24 @@
+name: drop-unparsed
+type: json
+
+mapping:
+  timestamp:
+    field: ts
+  severity:
+    field: level
+  body:
+    field: msg
+
+columns:
+  - name: Time
+    source: timestamp
+    format: time_short
+    width: 8
+  - name: Level
+    source: severity
+    width: 5
+  - name: Message
+    source: body
+    flex: true
+
+drop_unparsed: true

@@ -421,3 +421,36 @@ func TestJSONStillWorksAfterLogfmt(t *testing.T) {
 		t.Errorf("Body = %q, want %q", entry.Body, "db timeout")
 	}
 }
+
+func TestRawEntry(t *testing.T) {
+	line := "Error: something exploded at /app/main.js:42"
+	entry := RawEntry(line)
+	if entry.Body != line {
+		t.Errorf("Body = %q, want the whole line", entry.Body)
+	}
+	if entry.Raw != line {
+		t.Errorf("Raw = %q, want the whole line", entry.Raw)
+	}
+	if entry.Severity != "" {
+		t.Errorf("Severity = %q, want empty", entry.Severity)
+	}
+	if entry.Timestamp.IsZero() {
+		t.Error("Timestamp should be set to arrival time")
+	}
+	if time.Since(entry.Timestamp) > time.Minute {
+		t.Errorf("Timestamp %v not near now", entry.Timestamp)
+	}
+	if entry.Fields == nil {
+		t.Error("Fields should be non-nil")
+	}
+}
+
+func TestRawEntryStripsAnsi(t *testing.T) {
+	entry := RawEntry("\x1b[32m➜\x1b[39m  Local: http://localhost:3000/")
+	if strings.Contains(entry.Body, "\x1b") {
+		t.Errorf("Body still contains ANSI escapes: %q", entry.Body)
+	}
+	if entry.Body != "➜  Local: http://localhost:3000/" {
+		t.Errorf("Body = %q", entry.Body)
+	}
+}
